@@ -18,7 +18,7 @@ A teardown of the whole system: what runs where, how a game moves from lobby to 
 
 - **No server code of its own.** The app is static files on Vercel. All game rules live in Postgres functions (`supabase/migrations/`).
 - **The browser can't read the tables directly.** RLS is enabled with no policies, and table privileges are revoked from `anon`. The only way in is through the public RPC functions, which run as `SECURITY DEFINER` and decide what each player may see.
-- **No websockets.** Each phone calls `get_state` every 3 s. That call also runs `_tick`, which fires pings, applies hint penalties and ends the game when time runs out. So the game clock only moves forward while at least one phone is polling.
+- **No websockets.** Each phone calls `get_state` every 3 s, and that call runs `_tick`, which fires pings, applies hint penalties and ends the game when time runs out. A **pg_cron job (`ghostrun-tick`, every 30 s)** also runs `_tick_all()`, so the game clock keeps moving and old games are cleaned up even when no phone is open.
 
 ## 2. Identity
 
@@ -51,7 +51,7 @@ The profile (name, avatar, birth year) stays on the phone (`gr.profile`). The se
 **Each `_tick`** (runs on every `get_state`):
 1. No ghosts left → hunters win.
 2. Past `ends_at` → ghosts win.
-3. Past `next_ping_at` → `ping_seq++`, save a snapshot of every ghost's last location, give each ghost a hint with a 60 s deadline, schedule the next ping.
+3. Past `next_ping_at` → `ping_seq++`, snapshot **every** ghost (last known position plus `at`; `no_gps: true` with no coordinates if their location is missing or older than 2 min), give each ghost a hint with a 60 s deadline, schedule the next ping.
 4. A hint whose deadline passed without a photo → a **penalty ping** that shows only that ghost's position.
 
 **Catching.** A hunter calls `report_catch`. The ghost sees a "did they tag you?" dialog (`catch_request` in their state) and answers through `respond_catch`. On yes (`_apply_catch`):
@@ -73,6 +73,7 @@ On no, the hunter gets an "escaped" toast and must wait 30 s before claiming the
 | Players list (names, teams, caught) | ✅ | ✅ |
 | Live position of own teammates (fresh within 2 min) | ✅ hunters | ✅ ghosts |
 | Ghost positions | only via the last 6 pings/penalty snapshots | ❌ |
+| Each ghost's GPS freshness (`ghost_gps`, after head start) | ✅ | ❌ |
 | Photo hints | ✅ (incremental via `p_photos_since`) | ❌ |
 | Own catch claims (last 2 min) | ✅ | — |
 | "Hunters last saw you" + due hint + pending catch | — | ✅ |
@@ -93,14 +94,20 @@ A hunter's live position is never sent to ghosts.
 - **Publishable key** in `api.js`: safe to ship, because it can only call the RPCs above.
 - **Server-side checks**: inputs are validated in SQL (mode and team via CHECK constraints, avatar whitelist, JPEG-only photos, 20-character names).
 
-## 8. Known limits (by design, not bugs)
+## 8. GPS honesty
 
-- **A ghost who blocks GPS never shows up in pings.** There is no location row to snapshot. Hunters can see the player is still a ghost, but the map shows nothing for them.
-- **The game clock depends on polling.** It only advances while someone polls. That is fine in play, but a game with every phone locked "pauses" until someone opens the app.
+A ghost can't hide by turning location off:
+- Hunters get a yellow banner listing every ghost whose GPS has been silent for more than 2 minutes (or never arrived).
+- Ping markers show how old the position is (when the ghost was really there), not when the ping fired.
+- The ghost gets a banner of their own as soon as location is denied, or after 60 s without a fix.
+- No-GPS ghosts still get the photo-hint camera, and missing it still triggers a penalty.
+
+## 9. Known limits
+
 - **Catches are on the honour system.** The tagged ghost confirms their own catch.
 - **Host transfer is arbitrary on a tie.** If two players joined in the same instant, which one becomes host is not defined.
 
-## 9. Testing
+## 10. Testing
 
-- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, JS errors and phone-width overflow. 31 checks.
-- The server functions were play-tested inside rolled-back transactions on the live database: auth, guards, pings, penalties, catches, win conditions, data wiping and the hardening fixes.
+- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors and phone-width overflow. 39 checks.
+- The server functions were play-tested inside rolled-back transactions on the live database: auth, guards, pings, penalties, catches, win conditions, data wiping, the hardening fixes, no-GPS snapshots and cron-driven pings and time-up.
