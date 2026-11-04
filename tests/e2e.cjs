@@ -17,7 +17,7 @@ function tick(g) {
   if (g.ends_at && Date.now() >= +new Date(g.ends_at)) return end(g, 'ghosts');
   if (g.next_ping_at && Date.now() >= +new Date(g.next_ping_at)) {
     g.ping_seq++;
-    g.pings.unshift({ seq: g.ping_seq, kind: 'ping', created_at: nowIso(), snapshot: gp(g).filter((p) => p.team === 'ghost' && g.locs[p.id]).map((p) => ({ id: p.id, ...g.locs[p.id] })) });
+    g.pings.unshift({ seq: g.ping_seq, kind: 'ping', created_at: nowIso(), snapshot: gp(g).filter((p) => p.team === 'ghost').map((p) => { const l = g.locs[p.id]; return l ? { id: p.id, ...l, no_gps: Date.now() - +new Date(l.at) > 120000 } : { id: p.id, lat: null, lng: null, at: null, no_gps: true }; }) });
     gp(g).filter((p) => p.team === 'ghost').forEach((p) => g.hints.push({ player: p.id, seq: g.ping_seq, deadline: new Date(Date.now() + 60000).toISOString(), photo: null }));
     g.next_ping_at = new Date(Date.now() + interval(g) * 60000).toISOString();
   }
@@ -40,8 +40,9 @@ const api = {
       me: { id: me.id, name: me.name, avatar: me.avatar, team: me.team },
       players: gp(g).map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, team: p.team, caught: !p.alive, caught_by: p.caught_by || null, online: true })),
       teammates: gp(g).filter((p) => p.team === me.team && p.id !== me.id && g.locs[p.id]).map((p) => ({ id: p.id, ...g.locs[p.id] })) };
-    if (me.team === 'hunter') Object.assign(res, { pings: g.pings.slice(0, 6), photos: g.hints.filter((h) => h.photo && (!a.p_photos_since || h.uploaded_at > a.p_photos_since)).map((h) => ({ player_id: h.player, seq: h.seq, photo: h.photo, uploaded_at: h.uploaded_at })), my_claims: g.catchesList.filter((c) => c.hunter === me.id).map((c) => ({ id: c.id, ghost_id: c.ghost, status: c.status })) });
-    else { const ls = g.pings.flatMap((p) => p.snapshot).find((s) => s.id === me.id); const hd = g.hints.find((h) => h.player === me.id && !h.photo && Date.now() < +new Date(h.deadline)); const cr = g.catchesList.filter((c) => c.ghost === me.id && c.status === 'pending').pop();
+    if (me.team === 'hunter') Object.assign(res, { pings: g.pings.slice(0, 6), photos: g.hints.filter((h) => h.photo && (!a.p_photos_since || h.uploaded_at > a.p_photos_since)).map((h) => ({ player_id: h.player, seq: h.seq, photo: h.photo, uploaded_at: h.uploaded_at })), my_claims: g.catchesList.filter((c) => c.hunter === me.id).map((c) => ({ id: c.id, ghost_id: c.ghost, status: c.status })),
+      ghost_gps: g.status === 'live' && Date.now() >= +new Date(g.hunt_starts_at) ? gp(g).filter((p) => p.team === 'ghost').map((p) => ({ id: p.id, age_s: g.locs[p.id] ? Math.floor((Date.now() - +new Date(g.locs[p.id].at)) / 1000) : null })) : [] });
+    else { const ls = g.pings.flatMap((p) => p.snapshot).find((s) => s.id === me.id && s.lat != null); const hd = g.hints.find((h) => h.player === me.id && !h.photo && Date.now() < +new Date(h.deadline)); const cr = g.catchesList.filter((c) => c.ghost === me.id && c.status === 'pending').pop();
       Object.assign(res, { last_seen: ls || null, hint_due: hd ? { seq: hd.seq, deadline: hd.deadline } : null, catch_request: cr ? { id: cr.id, hunter_id: cr.hunter } : null }); }
     return res;
   },
@@ -60,10 +61,10 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
 
 (async () => {
   const browser = await chromium.launch();
-  const mk = async (lat, lng) => { const ctx = await browser.newContext({ ...devices['Pixel 7'], geolocation: { latitude: lat, longitude: lng, accuracy: 10 }, permissions: ['geolocation'] }); await wire(ctx); const page = await ctx.newPage(); const errs = []; page.on('pageerror', (e) => errs.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' && !/openfreemap|Failed to load resource|ERR_FAILED|AJAXError/i.test(m.text())) errs.push(m.text()); }); page.errs = errs; return page; };
-  const host = await mk(30.7701, 76.5759), ghost = await mk(30.7712, 76.5771);
+  const mk = async (lat, lng) => { const ctx = await browser.newContext({ ...devices['Pixel 7'], ...(lat ? { geolocation: { latitude: lat, longitude: lng, accuracy: 10 }, permissions: ['geolocation'] } : { permissions: [] }) }); await wire(ctx); const page = await ctx.newPage(); const errs = []; page.on('pageerror', (e) => errs.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' && !/openfreemap|Failed to load resource|ERR_FAILED|AJAXError/i.test(m.text())) errs.push(m.text()); }); page.errs = errs; return page; };
+  const host = await mk(30.7701, 76.5759), ghost = await mk(30.7712, 76.5771), dark = await mk(null);
   const URL = 'http://localhost:4173/';
-  for (const [pg, name, av] of [[host, 'Bhishu', 'hunter'], [ghost, 'Riya', 'sneak']]) {
+  for (const [pg, name, av] of [[host, 'Bhishu', 'hunter'], [ghost, 'Riya', 'sneak'], [dark, 'Kabir', 'shadow']]) {
     await pg.goto(URL); await pg.waitForSelector('#pGo');
     await pg.click('#pGo'); check(`${name}: empty profile shows error`, await pg.isVisible('#pErr'));
     await pg.fill('#pName', name); await pg.click(`[data-av="${av}"]`);
@@ -77,12 +78,13 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   check('bad code error shown', /No game/.test(await ghost.textContent('#hErr')));
   await host.click('[data-mode="endless"]'); await host.click('#hHost'); await host.waitForSelector('.codebox');
   await ghost.fill('#hCode', 'k7qx'); await ghost.click('#hJoin'); await ghost.waitForSelector('.codebox');
+  await dark.fill('#hCode', 'K7QX'); await dark.click('#hJoin'); await dark.waitForSelector('.codebox');
   await sleep(3500);
-  check('host lobby lists both players', (await host.$$('.pl')).length === 2);
+  check('host lobby lists all 3 players', (await host.$$('.pl')).length === 3);
   check('lobby shows ping ladder for endless', await host.isVisible('.ladder'));
   check('ghost sees waiting text', await ghost.isVisible('.waiting'));
   await host.screenshot({ path: OUT + '/02-lobby-host.png' });
-  await host.click('#lStart'); await sleep(3500);
+  await host.click('#lStart'); const liveAt = Date.now(); await sleep(3500);
   check('host HUD live as HUNTER', (await host.textContent('.role')) === 'HUNTER');
   check('ghost HUD live as GHOST', (await ghost.textContent('.role')) === 'GHOST');
   check('head-start banner', /Hunters start in/.test(await ghost.textContent('.hud')));
@@ -98,6 +100,10 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   const g = Object.values(games)[0]; g.hunt_starts_at = new Date(Date.now() - 1000).toISOString(); g.next_ping_at = new Date(Date.now() - 1000).toISOString();
   await sleep(3800);
   check('ghost camera opens on ping', await ghost.isVisible('.cam'));
+  const g0 = Object.values(games)[0];
+  check('GPS-off ghost is in the ping snapshot as no_gps', g0.pings[0].snapshot.some((x) => x.no_gps && x.lat == null));
+  check('hunter warned about GPS-off ghost', /No GPS from Kabir/.test(await host.textContent('.hud')));
+  await host.screenshot({ path: OUT + '/04b-hunter-nogps.png' });
   await ghost.screenshot({ path: OUT + '/04-camera.png' });
   // headless has no camera -> fallback; use file picker
   const fallbackShown = await ghost.isVisible('#camPickWrap');
@@ -115,6 +121,14 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   check('hunter sees ping marker', (await host.$$('.mk.echo')).length >= 1);
   await host.click('#gHints'); check('hunter sees photo hint', (await host.$$('.hints figure')).length === 1);
   await host.screenshot({ path: OUT + '/05-hunter-hints.png' }); await host.click('#hClose');
+  await sleep(Math.max(0, 21500 - (Date.now() - liveAt)));
+  check('GPS-off ghost sees location warning', /Your location is off/.test(await dark.textContent('.hud')));
+  await dark.screenshot({ path: OUT + '/04c-ghost-nogps.png' });
+  // Kabir sends his hint from the camera fallback, then quits so Riya is the last ghost
+  check('GPS-off ghost still gets the photo-hint camera', await dark.isVisible('.cam'));
+  await dark.setInputFiles('#camPick', { name: 'b.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
+  await dark.waitForSelector('#camSend:not([hidden])'); await dark.click('#camSend'); await sleep(400);
+  await dark.click('#gMenu'); await dark.click('#mLeave'); await sleep(300);
   // catch, ghost rejects
   await host.click('#gCatch'); await host.click('.picklist .pl'); await sleep(3800);
   check('ghost gets confirm dialog', await ghost.isVisible('.confirm'));
@@ -135,7 +149,7 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   // reload resumes session
   const hp = await host.evaluate(() => localStorage.getItem('gr.session'));
   check('session cleared after leave', hp === null);
-  for (const [n, p] of [['host', host], ['ghost', ghost]]) check(`${n}: no JS errors`, p.errs.length === 0, p.errs.slice(0, 3).join(' | '));
+  for (const [n, p] of [['host', host], ['ghost', ghost], ['gps-off ghost', dark]]) check(`${n}: no JS errors`, p.errs.length === 0, p.errs.slice(0, 3).join(' | '));
   // horizontal overflow at phone width
   check('no horizontal scroll', await host.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   console.log(results.join('\n'));

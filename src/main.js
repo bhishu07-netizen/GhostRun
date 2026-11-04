@@ -158,6 +158,7 @@ function playerById(id) { return S.players.find((p) => p.id === id); }
 function leaveGame() {
   const s = session.get();
   if (s) rpc('leave_game', { p_player: s.player_id, p_secret: s.secret }).catch(() => {});
+  if (cam) cam.close();
   session.clear(); stopPolling(); clearGameMap(); modal.innerHTML = ''; renderHome();
 }
 
@@ -186,6 +187,7 @@ function detectEvents(prev, st) {
 
 function caughtSplash(text, left) {
   buzz([80, 40, 140]);
+  if (cameraOpen) { toast(`${text} · ${left} ghost${left === 1 ? '' : 's'} left`); return; } // don't wipe a photo hint in progress
   modal.innerHTML = `<div class="splash" role="alert"><img src="/e/out.png" alt=""><b>CAUGHT!</b><span>${esc(text)}</span><em>${left} ghost${left === 1 ? '' : 's'} left</em></div>`;
   setTimeout(() => { if (modal.querySelector('.splash')) modal.innerHTML = ''; }, 2200);
 }
@@ -245,20 +247,23 @@ function renderLobby() {
 }
 
 // ------------------------------------------------------------------ live game
-let geoWatch = null, lastSent = 0, myPos = null, wakeLock = null;
+let geoWatch = null, lastSent = 0, myPos = null, wakeLock = null, lastFix = 0, geoStarted = 0, geoDenied = false;
 const markers = new Map(); // key -> marker
 let meMarker = null, cameraOpen = false, cam = null;
 
 function startGeo() {
-  if (geoWatch !== null || !('geolocation' in navigator)) return;
+  if (geoWatch !== null) return;
+  if (!('geolocation' in navigator)) { geoStarted = geoStarted || Date.now(); return; }
+  geoStarted = Date.now();
   geoWatch = navigator.geolocation.watchPosition((pos) => {
-    myPos = [pos.coords.longitude, pos.coords.latitude, pos.coords.accuracy];
+    myPos = [pos.coords.longitude, pos.coords.latitude, pos.coords.accuracy]; lastFix = Date.now(); geoDenied = false;
     if (Date.now() - lastSent > 5000) {
       lastSent = Date.now();
       rpc('update_location', { ...auth(), p_lat: myPos[1], p_lng: myPos[0], p_acc: Math.round(myPos[2]) }).catch(() => {});
     }
     drawMe();
   }, (e) => {
+    if (e.code === 1) geoDenied = true;
     toast(e.code === 1 ? 'Location is blocked. Allow location for this site so the game can work.' : 'GPS signal is weak. Step outside if you can.', 6000);
   }, { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 });
   keepAwake();
@@ -293,7 +298,7 @@ function clearGameMap() {
   if (meMarker) { meMarker.remove(); meMarker = null; }
   const src = map.getSource && map.getSource('acc');
   if (src) src.setData({ type: 'FeatureCollection', features: [] });
-  stopGeo(); centered = false; myPos = null;
+  stopGeo(); centered = false; myPos = null; lastFix = 0; geoStarted = 0; geoDenied = false;
 }
 
 function renderLive() {
@@ -305,6 +310,8 @@ function renderLive() {
   const headLeft = (ts(g.hunt_starts_at) - t) / 1000;
   const endLeft = g.ends_at ? (ts(g.ends_at) - t) / 1000 : null;
   const pingLeft = g.next_ping_at ? (ts(g.next_ping_at) - t) / 1000 : null;
+  const noGps = me.team === 'hunter' ? (S.ghost_gps || []).filter((x) => x.age_s == null || x.age_s > 120)
+    .map((x) => ({ ...x, p: playerById(x.id) })).filter((x) => x.p) : [];
 
   // ----- HUD
   hud.hidden = false;
@@ -319,6 +326,9 @@ function renderLive() {
       ${pingLeft !== null ? `<span>Next ping <b data-t="ping">${fmt(pingLeft)}</b> · every ${g.interval_min}m</span>` : `<span>${MODES[g.mode].label} mode</span>`}
     </div>
     ${headLeft > 0 ? `<div class="banner">${me.team === 'hunter' ? `Ghosts are hiding. You can hunt in <b data-t="head">${fmt(headLeft)}</b>` : `Run and hide! Hunters start in <b data-t="head">${fmt(headLeft)}</b>`}</div>` : ''}
+    ${me.team === 'ghost' && geoStarted && (geoDenied || (Date.now() - geoStarted > 20000 && Date.now() - lastFix > 60000))
+      ? '<div class="banner warn">Your location is off. Hunters can see that you have no GPS. Turn location on to play fair.</div>' : ''}
+    ${noGps.length ? `<div class="banner warn">No GPS from ${noGps.map((x) => `<b>${esc(x.p.name)}</b> (${x.age_s == null ? 'no signal yet' : 'last ' + fmt(x.age_s) + ' ago'})`).join(', ')}. Pings can't show them.</div>` : ''}
     ${me.team === 'ghost' && S.last_seen ? `<div class="banner soft">Hunters last saw you ${fmt((t - ts(S.last_seen.at)) / 1000)} ago</div>` : ''}
     <div class="hud-actions">
       ${me.team === 'hunter' ? '<button class="btn hot" id="gCatch">I caught someone</button><button class="btn soft slim" id="gHints">Hints</button>' : ''}
@@ -342,11 +352,12 @@ function renderLive() {
     (S.pings || []).forEach((pg) => {
       const age = (t - ts(pg.created_at)) / 60000;
       pg.snapshot.forEach((s) => {
-        if (shown.has(s.id)) return; // newest ping per ghost only
+        if (shown.has(s.id) || s.lat == null) return; // newest known position per ghost only
         const p = playerById(s.id); if (!p || p.team !== 'ghost') return;
         shown.add(s.id);
         const key = 'p:' + s.id;
-        setMarker(key, { avatar: p.avatar, label: `${p.name} · ${Math.max(0, Math.round(age))}m ago`, ring: RING.ghost, echo: true }, [s.lng, s.lat], Math.max(0.35, 1 - age / 20));
+        const seenAge = s.at ? (t - ts(s.at)) / 60000 : age; // when the ghost was really there, not when the ping fired
+        setMarker(key, { avatar: p.avatar, label: `${p.name} · ${Math.max(0, Math.round(seenAge))}m ago`, ring: RING.ghost, echo: true }, [s.lng, s.lat], Math.max(0.35, 1 - seenAge / 20));
         seen.add(key);
       });
     });
@@ -437,6 +448,7 @@ function openMenu() {
 
 // ------------------------------------------------------------------ results
 function renderResults() {
+  if (cam) cam.close();
   stopPolling(); clearGameMap(); hud.hidden = true; modal.innerHTML = ''; map.setOrbit(true); map.flyTo(CAMPUS_VIEW);
   const g = S.game;
   const counts = {};

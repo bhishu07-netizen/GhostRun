@@ -34,9 +34,11 @@ export function openCamera(root, { deadline, onPhoto, onClose }) {
   let stream = null, photo = null;
 
   const stop = () => { if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; };
-  const close = () => { stop(); clearInterval(timer); root.innerHTML = ''; onClose && onClose(); };
+  let closed = false;
+  const close = () => { if (closed) return; closed = true; stop(); clearInterval(timer); if (root.contains(video)) root.innerHTML = ''; onClose && onClose(); };
 
   const timer = setInterval(() => {
+    if (!root.contains(video)) { close(); return; } // something else replaced the dialog
     const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
     $('camTimer').textContent = left + 's';
     if (left <= 0) close();
