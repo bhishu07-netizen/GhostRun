@@ -125,6 +125,7 @@ function renderHome() {
 // ------------------------------------------------------------------ polling
 let pollTimer = null, S = null, clockOffset = 0, photosSince = null;
 const photoCache = new Map(); // key player_id:seq -> data url
+const toldClaims = new Set(); // rejected catch claims we've already told the hunter about
 function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
 function enterGame() { S = null; photoCache.clear(); photosSince = null; poll(); stopPolling(); pollTimer = setInterval(poll, 3000); }
 const now = () => Date.now() + clockOffset;
@@ -153,6 +154,13 @@ async function poll() {
 
 function playerById(id) { return S.players.find((p) => p.id === id); }
 
+// tell the server we're gone (host passes on, empty sides end the game), then forget the session locally
+function leaveGame() {
+  const s = session.get();
+  if (s) rpc('leave_game', { p_player: s.player_id, p_secret: s.secret }).catch(() => {});
+  session.clear(); stopPolling(); clearGameMap(); modal.innerHTML = ''; renderHome();
+}
+
 // catches, team switches, pings: the moments everyone should feel
 function detectEvents(prev, st) {
   if (!prev || prev.game.status !== 'live' || st.game.status !== 'live') return;
@@ -162,6 +170,14 @@ function detectEvents(prev, st) {
     caughtSplash(p.id === st.me.id ? 'You got caught! You hunt now.' : `${by ? by.name : 'A hunter'} got ${p.name}`,
       st.players.filter((x) => x.team === 'ghost').length);
   });
+  (st.my_claims || []).forEach((c) => {
+    if (c.status === 'rejected' && !toldClaims.has(c.id)) {
+      toldClaims.add(c.id);
+      const g = st.players.find((x) => x.id === c.ghost_id);
+      toast(`${g ? g.name : 'The ghost'} says they escaped.`);
+    }
+  });
+  if (prev.me.team === 'ghost' && st.me.team === 'hunter' && cameraOpen && cam) cam.close();
   if (st.game.ping_seq > prev.game.ping_seq) {
     buzz([60, 40, 60]);
     toast(st.me.team === 'hunter' ? 'Ping! Ghost positions updated.' : 'Ping! Hunters just saw where you are. Move!');
@@ -209,7 +225,7 @@ function renderLobby() {
       <p class="err" id="lErr" hidden></p>
     </section>`;
   const err = screen.querySelector('#lErr');
-  screen.querySelector('#lLeave').onclick = () => { session.clear(); renderHome(); };
+  screen.querySelector('#lLeave').onclick = leaveGame;
   screen.querySelector('#lShare').onclick = async () => {
     const text = `Join my Ghostrun hunt! Code: ${g.code} ${location.origin}`;
     try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); toast('Invite copied'); } }
@@ -231,7 +247,7 @@ function renderLobby() {
 // ------------------------------------------------------------------ live game
 let geoWatch = null, lastSent = 0, myPos = null, wakeLock = null;
 const markers = new Map(); // key -> marker
-let meMarker = null, cameraOpen = false;
+let meMarker = null, cameraOpen = false, cam = null;
 
 function startGeo() {
   if (geoWatch !== null || !('geolocation' in navigator)) return;
@@ -296,13 +312,13 @@ function renderLive() {
   hud.innerHTML = `
     <div class="hud-top">
       <span class="role">${me.team === 'hunter' ? 'HUNTER' : 'GHOST'}</span>
-      <span class="clock">${endLeft !== null ? fmt(endLeft) + ' left' : fmt((t - ts(g.started_at)) / 1000)}</span>
+      <span class="clock" data-t="${endLeft !== null ? 'end' : 'up'}">${endLeft !== null ? fmt(endLeft) + ' left' : fmt((t - ts(g.started_at)) / 1000)}</span>
     </div>
     <div class="hud-strip">
       <span><b>${ghostsLeft}</b> ghost${ghostsLeft === 1 ? '' : 's'} left</span>
-      ${pingLeft !== null ? `<span>Next ping <b>${fmt(pingLeft)}</b> · every ${g.interval_min}m</span>` : `<span>${MODES[g.mode].label} mode</span>`}
+      ${pingLeft !== null ? `<span>Next ping <b data-t="ping">${fmt(pingLeft)}</b> · every ${g.interval_min}m</span>` : `<span>${MODES[g.mode].label} mode</span>`}
     </div>
-    ${headLeft > 0 ? `<div class="banner">${me.team === 'hunter' ? `Ghosts are hiding. You can hunt in <b>${fmt(headLeft)}</b>` : `Run and hide! Hunters start in <b>${fmt(headLeft)}</b>`}</div>` : ''}
+    ${headLeft > 0 ? `<div class="banner">${me.team === 'hunter' ? `Ghosts are hiding. You can hunt in <b data-t="head">${fmt(headLeft)}</b>` : `Run and hide! Hunters start in <b data-t="head">${fmt(headLeft)}</b>`}</div>` : ''}
     ${me.team === 'ghost' && S.last_seen ? `<div class="banner soft">Hunters last saw you ${fmt((t - ts(S.last_seen.at)) / 1000)} ago</div>` : ''}
     <div class="hud-actions">
       ${me.team === 'hunter' ? '<button class="btn hot" id="gCatch">I caught someone</button><button class="btn soft slim" id="gHints">Hints</button>' : ''}
@@ -345,10 +361,10 @@ function renderLive() {
   if (me.team === 'ghost' && S.hint_due && !cameraOpen) {
     cameraOpen = true; buzz([200, 80, 200]);
     const seq = S.hint_due.seq;
-    openCamera(modal, {
+    cam = openCamera(modal, {
       deadline: ts(S.hint_due.deadline) - clockOffset,
       onPhoto: (photo) => rpc('upload_hint', { ...auth(), p_seq: seq, p_photo: photo }).then(() => toast('Hint sent. Now move!')),
-      onClose: () => { cameraOpen = false; },
+      onClose: () => { cameraOpen = false; cam = null; },
     });
   }
   if (me.team === 'ghost' && S.catch_request && !cameraOpen && !modal.querySelector('.confirm')) {
@@ -366,6 +382,18 @@ function renderLive() {
     modal.querySelector('#cNo').onclick = () => answer(false);
   }
 }
+
+setInterval(() => {
+  if (!S || S.game.status !== 'live' || hud.hidden) return;
+  const g = S.game, t = now();
+  hud.querySelectorAll('[data-t]').forEach((el) => {
+    const k = el.dataset.t;
+    if (k === 'end') el.textContent = fmt((ts(g.ends_at) - t) / 1000) + ' left';
+    else if (k === 'up') el.textContent = fmt((t - ts(g.started_at)) / 1000);
+    else if (k === 'ping') el.textContent = fmt((ts(g.next_ping_at) - t) / 1000);
+    else if (k === 'head') el.textContent = fmt((ts(g.hunt_starts_at) - t) / 1000);
+  });
+}, 1000);
 
 function openCatchSheet() {
   const ghosts = S.players.filter((p) => p.team === 'ghost');
@@ -402,7 +430,7 @@ function openMenu() {
     <button class="btn primary" id="mClose">Back to the hunt</button></div>`;
   modal.querySelector('#mClose').onclick = () => { modal.innerHTML = ''; };
   modal.querySelector('#mCenter').onclick = () => { modal.innerHTML = ''; if (myPos) map.flyTo({ center: myPos, zoom: 17.2 }); else toast('Waiting for your GPS…'); };
-  modal.querySelector('#mLeave').onclick = () => { modal.innerHTML = ''; session.clear(); clearGameMap(); renderHome(); };
+  modal.querySelector('#mLeave').onclick = leaveGame;
   const end = modal.querySelector('#mEnd');
   if (end) end.onclick = async () => { modal.innerHTML = ''; await rpc('end_game', auth()).catch((x) => toast(x.message)); poll(); };
 }
