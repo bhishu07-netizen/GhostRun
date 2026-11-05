@@ -69,7 +69,7 @@ function renderProfile() {
       <label class="field"><span>Year you were born</span>
         <select id="pYear"><option value="">Select</option>${Array.from({ length: 70 }, (_, i) => thisYear - 6 - i).map((y) => `<option ${p.year == y ? 'selected' : ''}>${y}</option>`).join('')}</select>
       </label>
-      <p class="fine">Ghostrun shares your live location with the other players in your game only, and deletes it when the game ends. You must be 13 or older to play. By playing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
+      <p class="fine">Ghostrun shares your live location with the other players in your game only, and deletes it when the game ends. You must be 13 or older to play. By playing you agree to the <a href="/terms">Terms &amp; Conditions</a> and <a href="/privacy">Privacy Policy</a>.</p>
       <p class="err" id="pErr" hidden></p>
       <button class="btn primary" id="pGo">Let's play</button>
     </section>`;
@@ -115,7 +115,7 @@ function renderHome() {
       </div>
       <p class="hint" id="hCodeHelp">One friend hosts and shares a code. Everyone else types it here to join their hunt.</p>
       <p class="err" id="hErr" hidden></p>
-      <p class="legal"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · Play safe, stay out of private property</p>
+      <p class="legal"><a href="/privacy">Privacy</a> · <a href="/terms">Terms &amp; Conditions</a> · Play safe, stay out of private property</p>
     </section>`;
   const err = screen.querySelector('#hErr');
   const fail = (m) => { err.textContent = m; err.hidden = false; };

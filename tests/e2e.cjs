@@ -171,7 +171,7 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   check('Privacy page fits phone width', await london.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await london.screenshot({ path: OUT + '/08-privacy.png', fullPage: true });
   await london.click('footer a[href="/terms"]'); await london.waitForSelector('h1');
-  check('Terms page opens from Privacy', /Terms of Use/.test(await london.textContent('h1')));
+  check('Terms page opens from Privacy', /Terms & Conditions/.test(await london.textContent('h1')));
   check('Terms page fits phone width', await london.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await london.screenshot({ path: OUT + '/09-terms.png', fullPage: true });
   // horizontal overflow at phone width
