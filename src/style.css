@@ -74,6 +74,10 @@ img { max-width: 100%; }
 .mode span { font-size: 11px; color: var(--muted); }
 .mode.on { border-color: var(--accent); background: #fff; }
 .joinrow { display: flex; gap: 10px; align-items: flex-end; }
+#hCode::placeholder { letter-spacing: 0; text-transform: none; font-weight: 500; font-size: 16px; color: var(--muted); opacity: .7; }
+.or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-weight: 600; font-size: 13px; }
+.or::before, .or::after { content: ""; flex: 1; height: 2px; background: var(--line); border-radius: 2px; }
+.hint { margin: -4px 0 0; font-size: 13px; color: var(--muted); line-height: 1.4; }
 
 .codebox { display: flex; flex-direction: column; align-items: center; gap: 4px; background: var(--soft); border-radius: 20px; padding: 12px; }
 .codebox b { font-size: 44px; letter-spacing: 10px; line-height: 1.1; padding-left: 10px; }

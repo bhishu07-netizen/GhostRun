@@ -91,10 +91,12 @@ function renderHome() {
         ${Object.entries(MODES).map(([k, m]) => `<button class="mode ${k === mode ? 'on' : ''}" role="radio" aria-checked="${k === mode}" data-mode="${k}"><b>${m.label}</b><span>${m.sub}</span></button>`).join('')}
       </div>
       <button class="btn primary" id="hHost">Host a hunt</button>
+      <div class="or"><span>or</span></div>
       <div class="joinrow">
-        <label class="field grow"><span>Lobby code</span><input id="hCode" maxlength="4" autocapitalize="characters" autocomplete="off" placeholder="K7QX"></label>
+        <label class="field grow"><span>Got a code from a friend?</span><input id="hCode" maxlength="4" autocapitalize="characters" autocomplete="off" placeholder="4-letter code" aria-describedby="hCodeHelp"></label>
         <button class="btn soft" id="hJoin">Join</button>
       </div>
+      <p class="hint" id="hCodeHelp">One friend hosts and shares a code. Everyone else types it here to join their hunt.</p>
       <p class="err" id="hErr" hidden></p>
     </section>`;
   const err = screen.querySelector('#hErr');
