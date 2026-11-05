@@ -150,6 +150,15 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   const hp = await host.evaluate(() => localStorage.getItem('gr.session'));
   check('session cleared after leave', hp === null);
   for (const [n, p] of [['host', host], ['ghost', ghost], ['gps-off ghost', dark]]) check(`${n}: no JS errors`, p.errs.length === 0, p.errs.slice(0, 3).join(' | '));
+  // global: last GPS spot is remembered (rounded) so the map opens there next time
+  const lp = JSON.parse(await host.evaluate(() => localStorage.getItem('gr.lastpos')) || 'null');
+  check('last position remembered, rounded', lp && Math.abs(lp[0] - 76.576) < 0.002 && Math.abs(lp[1] - 30.770) < 0.002, JSON.stringify(lp));
+  // global: a phone in London can host a game too
+  const london = await mk(51.5074, -0.1278);
+  await london.goto(URL); await london.fill('#pName', 'Ollie'); await london.click('[data-av="scout"]'); await london.selectOption('#pYear', '2000'); await london.click('#pGo');
+  await london.click('#hHost'); await london.waitForSelector('.codebox');
+  check('London phone hosts a lobby', await london.isVisible('#lStart'));
+  check('London phone: no JS errors', london.errs.length === 0, london.errs.slice(0, 3).join(' | '));
   // horizontal overflow at phone width
   check('no horizontal scroll', await host.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   console.log(results.join('\n'));

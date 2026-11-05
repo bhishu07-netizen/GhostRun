@@ -2,20 +2,21 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { pastelStyle, buildingHeight } from './pastelStyle.js';
 
-export const CU = [76.575865, 30.770084];
-export const CAMPUS_VIEW = { center: CU, zoom: 16, pitch: 45, bearing: -15 };
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+export const WORLD_VIEW = { center: [20, 20], zoom: 1.4, pitch: 0, bearing: 0 };
+export const localView = (lngLat) => ({ center: lngLat, zoom: 16, pitch: 45, bearing: -15 });
 
-export function createMap(onError) {
+// start where this player last played, or on the whole globe
+export function createMap(onError, start = WORLD_VIEW) {
   const map = new maplibregl.Map({
     container: 'map',
     style: pastelStyle(),
-    ...CAMPUS_VIEW,
-    minZoom: 13,
+    ...start,
+    minZoom: 1,
     maxZoom: 19.5,
-    maxBounds: [[CU[0] - 0.06, CU[1] - 0.05], [CU[0] + 0.06, CU[1] + 0.05]],
     attributionControl: false,
   });
+  map.on('style.load', () => { try { map.setProjection({ type: 'globe' }); } catch { /* flat map is fine */ } });
   map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
   map.on('error', (e) => onError && onError((e && e.error && e.error.message) || 'Map error'));
 
@@ -35,11 +36,18 @@ export function createMap(onError) {
     // if the tab is in the background, rAF never fires: make sure buildings still stand up
     setTimeout(() => map.setPaintProperty('building-3d', 'fill-extrusion-height', buildingHeight(1)), 2500);
   };
-  map.on('load', grow);
+  // buildings grow the first time we're close enough to see them
+  const maybeGrow = () => { if (map.getZoom() >= 14) grow(); };
+  map.on('load', maybeGrow);
+  map.on('zoomend', maybeGrow);
 
   // gentle orbit for menu screens
   let orbiting = false;
-  const spin = () => { if (orbiting) map.easeTo({ bearing: map.getBearing() + 8, duration: 4000, easing: (x) => x }); };
+  const spin = () => {
+    if (!orbiting) return;
+    if (map.getZoom() < 5) { const c = map.getCenter(); map.easeTo({ center: [c.lng + 12, c.lat], duration: 4000, easing: (x) => x }); } // turn the globe
+    else map.easeTo({ bearing: map.getBearing() + 8, duration: 4000, easing: (x) => x }); // circle the neighbourhood
+  };
   map.on('moveend', spin);
   ['mousedown', 'touchstart', 'wheel', 'dragstart'].forEach((ev) => map.on(ev, () => { orbiting = false; }));
   map.setOrbit = (on) => {
