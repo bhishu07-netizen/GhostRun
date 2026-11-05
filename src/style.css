@@ -45,6 +45,8 @@ img { max-width: 100%; }
 .muted { color: var(--muted); margin: 0; }
 .small { font-size: 13px; margin: 0; }
 .fine { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.4; }
+.fine a, .legal a { color: var(--accent-deep); font-weight: 600; }
+.legal { margin: 0; text-align: center; font-size: 12px; color: var(--muted); }
 .err { margin: 0; color: var(--hunt-deep); font-weight: 600; font-size: 14px; }
 .waiting { margin: 0; text-align: center; font-weight: 600; color: var(--muted); }
 
