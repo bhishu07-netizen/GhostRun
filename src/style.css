@@ -36,6 +36,9 @@ img { max-width: 100%; }
 .row.between { justify-content: space-between; }
 .logo { font-family: var(--display); font-style: italic; font-weight: 900; font-size: 30px; letter-spacing: -.5px; margin: 0; line-height: 1; }
 .logo.big { font-size: 46px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand img { flex: none; }
+.brand.big { flex-direction: column; gap: 8px; }
 .logo.small { font-size: 22px; }
 .logo.pink { color: var(--hunt-deep); }
 .logo.blue { color: var(--ghost-deep); }
@@ -110,6 +113,7 @@ img { max-width: 100%; }
 .banner { background: var(--hunt-soft); border: 2px solid #F6C9E2; border-radius: 16px; padding: 10px 12px; font-weight: 600; }
 .hud.ghost .banner { background: var(--ghost-soft); border-color: #C7D2FE; }
 .banner.soft { background: var(--card) !important; border-color: var(--line) !important; font-size: 14px; }
+.banner.warn { background: #FEF3C7 !important; border-color: #FCD34D !important; color: #78350F; font-size: 14px; }
 .hud-actions { margin-top: auto; display: flex; gap: 10px; }
 .hud-actions .hot { flex: 1; }
 
