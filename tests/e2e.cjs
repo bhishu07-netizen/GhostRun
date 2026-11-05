@@ -88,7 +88,10 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   check('host HUD live as HUNTER', (await host.textContent('.role')) === 'HUNTER');
   check('ghost HUD live as GHOST', (await ghost.textContent('.role')) === 'GHOST');
   check('head-start banner', /Hunters start in/.test(await ghost.textContent('.hud')));
-  const c1 = await ghost.textContent('[data-t="head"]'); await sleep(1500); const c2 = await ghost.textContent('[data-t="head"]');
+  // the display can lag up to 1 s and rounds to whole seconds, so allow 2.5 s for it to move
+  const c1 = await ghost.textContent('[data-t="head"]');
+  await ghost.waitForFunction((v) => document.querySelector('[data-t="head"]').textContent !== v, c1, { timeout: 2500 }).catch(() => {});
+  const c2 = await ghost.textContent('[data-t="head"]');
   check('countdown ticks every second', c1 !== c2, `${c1} -> ${c2}`);
   check('geolocation sent to server', calls.includes('update_location'));
   await ghost.screenshot({ path: OUT + '/03-live-ghost.png' });
