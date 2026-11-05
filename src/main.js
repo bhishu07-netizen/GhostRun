@@ -60,7 +60,7 @@ function renderProfile() {
   const thisYear = new Date().getFullYear();
   screen.innerHTML = `
     <section class="card sheet">
-      <h1 class="logo big">GHOSTRUN</h1>
+      <div class="brand big"><img src="/icons/icon-192.png" alt="" width="88" height="88"><h1 class="logo big">GHOSTRUN</h1></div>
       <p class="muted">Pick who you'll be on the map.</p>
       <label class="field"><span>Your name</span><input id="pName" maxlength="20" autocomplete="nickname" value="${esc(p.name || '')}" placeholder="Bhishu"></label>
       <div class="avatars" role="radiogroup" aria-label="Choose an avatar">
@@ -100,7 +100,7 @@ function renderHome() {
   screen.innerHTML = `
     <section class="card sheet">
       <div class="row between">
-        <h1 class="logo">GHOSTRUN</h1>
+        <div class="brand"><img src="/icons/icon-192.png" alt="" width="40" height="40"><h1 class="logo">GHOSTRUN</h1></div>
         <button class="chip me" id="hEdit"><img src="/a/${esc(p.avatar)}.png" alt=""><span>${esc(p.name)}</span></button>
       </div>
       <p class="muted">Real-life manhunt anywhere: your campus, your block, your park. Hide, hunt, don't get caught.</p>
