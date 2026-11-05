@@ -3,8 +3,8 @@ import '@fontsource/fredoka/600.css';
 import '@fontsource/fredoka/700.css';
 import '@fontsource/kanit/900-italic.css';
 import './style.css';
-import { rpc, profile, session, auth } from './api.js';
-import { createMap, avatarMarker, circle, CAMPUS_VIEW } from './map.js';
+import { rpc, profile, session, auth, lastPos } from './api.js';
+import { createMap, avatarMarker, circle, WORLD_VIEW, localView } from './map.js';
 import { openCamera } from './camera.js';
 
 const AVATARS = [
@@ -33,8 +33,25 @@ function toast(msg, ms = 3500) {
 }
 const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch { /* not supported */ } };
 
-const map = createMap((m) => console.warn(m));
+const homeView = () => (lastPos.get() ? localView(lastPos.get()) : WORLD_VIEW);
+const map = createMap((m) => console.warn(m), homeView());
 map.setOrbit(true);
+
+// if location is already allowed, quietly open the map over the player's neighbourhood (never prompts)
+async function locateQuietly() {
+  try {
+    if (!navigator.permissions || !navigator.geolocation) return;
+    const p = await navigator.permissions.query({ name: 'geolocation' });
+    if (p.state !== 'granted') return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const ll = [pos.coords.longitude, pos.coords.latitude];
+      const first = !lastPos.get();
+      lastPos.set(ll);
+      if (first && !S) map.flyTo({ ...localView(ll), duration: 3500 });
+    }, () => {}, { maximumAge: 600000, timeout: 15000 });
+  } catch { /* not supported */ }
+}
+locateQuietly();
 
 // ------------------------------------------------------------------ profile + age gate
 function renderProfile() {
@@ -86,7 +103,7 @@ function renderHome() {
         <h1 class="logo">GHOSTRUN</h1>
         <button class="chip me" id="hEdit"><img src="/a/${esc(p.avatar)}.png" alt=""><span>${esc(p.name)}</span></button>
       </div>
-      <p class="muted">Real-life manhunt on campus. Hide, hunt, don't get caught.</p>
+      <p class="muted">Real-life manhunt anywhere: your campus, your block, your park. Hide, hunt, don't get caught.</p>
       <div class="modes" role="radiogroup" aria-label="Game mode">
         ${Object.entries(MODES).map(([k, m]) => `<button class="mode ${k === mode ? 'on' : ''}" role="radio" aria-checked="${k === mode}" data-mode="${k}"><b>${m.label}</b><span>${m.sub}</span></button>`).join('')}
       </div>
@@ -247,7 +264,7 @@ function renderLobby() {
 }
 
 // ------------------------------------------------------------------ live game
-let geoWatch = null, lastSent = 0, myPos = null, wakeLock = null, lastFix = 0, geoStarted = 0, geoDenied = false;
+let lastSaved = 0, geoWatch = null, lastSent = 0, myPos = null, wakeLock = null, lastFix = 0, geoStarted = 0, geoDenied = false;
 const markers = new Map(); // key -> marker
 let meMarker = null, cameraOpen = false, cam = null;
 
@@ -261,6 +278,7 @@ function startGeo() {
       lastSent = Date.now();
       rpc('update_location', { ...auth(), p_lat: myPos[1], p_lng: myPos[0], p_acc: Math.round(myPos[2]) }).catch(() => {});
     }
+    if (Date.now() - lastSaved > 60000) { lastSaved = Date.now(); lastPos.set(myPos); }
     drawMe();
   }, (e) => {
     if (e.code === 1) geoDenied = true;
@@ -449,7 +467,7 @@ function openMenu() {
 // ------------------------------------------------------------------ results
 function renderResults() {
   if (cam) cam.close();
-  stopPolling(); clearGameMap(); hud.hidden = true; modal.innerHTML = ''; map.setOrbit(true); map.flyTo(CAMPUS_VIEW);
+  stopPolling(); clearGameMap(); hud.hidden = true; modal.innerHTML = ''; map.setOrbit(true); map.flyTo(homeView());
   const g = S.game;
   const counts = {};
   S.players.forEach((p) => { if (p.caught_by) counts[p.caught_by] = (counts[p.caught_by] || 0) + 1; });

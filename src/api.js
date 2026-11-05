@@ -29,6 +29,11 @@ export const profile = {
   get: () => store.get('gr.profile'),
   set: (p) => store.set('gr.profile', p),
 };
+// where this player last had GPS, rounded to ~100 m; only used to open the map near them
+export const lastPos = {
+  get: () => store.get('gr.lastpos'),
+  set: ([lng, lat]) => store.set('gr.lastpos', [Math.round(lng * 1000) / 1000, Math.round(lat * 1000) / 1000]),
+};
 export const session = {
   get: () => store.get('gr.session'),
   set: (s) => store.set('gr.session', s),

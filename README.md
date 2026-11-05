@@ -1,6 +1,6 @@
 # Ghostrun
 
-Real-life manhunt for Chandigarh University. Hunters chase ghosts across campus on a pastel 3D map; ghosts get pinged on a schedule and must send a photo hint at every ping.
+Real-life manhunt you can play anywhere in the world: a campus, a neighbourhood, a park. Hunters chase ghosts on a pastel 3D map; ghosts get pinged on a schedule and must send a photo hint at every ping. Born at Chandigarh University.
 
 ## Modes
 - **Quick** (15 min): no pings, pure hide and seek

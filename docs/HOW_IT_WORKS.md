@@ -83,7 +83,7 @@ A hunter's live position is never sent to ghosts.
 ## 6. Client internals (`src/`)
 
 - **`main.js`**: one file holds every screen. `renderProfile → renderHome → (poll loop) renderLobby / renderLive / renderResults`. Each poll replaces the whole screen with `innerHTML` built from the new state, with every value escaped by `esc()`. `detectEvents(prev, next)` compares two states to trigger the caught splash, the ping buzz and the "escaped" toast. A 1 s ticker updates the `[data-t]` countdowns between polls. `clockOffset` corrects for a wrong phone clock using the server's `now`.
-- **`map.js`**: MapLibre centred on Chandigarh University, limited to roughly ±6 km. Buildings rise in an intro animation, and the map slowly orbits on menu screens. `avatarMarker` is an HTML marker with a coloured ring. `circle()` draws the GPS accuracy halo.
+- **`map.js`**: MapLibre with a globe projection and no area limit, so it works anywhere. On the menus it opens over the player's last known spot (`gr.lastpos`, rounded to about 100 m, stored only on the phone). If location is already allowed, it quietly moves there without a permission prompt. Otherwise it shows the whole globe and slowly turns it. Buildings rise the first time the map is zoomed in close enough to see them. `avatarMarker` is an HTML marker with a coloured ring. `circle()` draws the GPS accuracy halo.
 - **`pastelStyle.js`**: a hand-written MapLibre style over OpenFreeMap tiles.
 - **`camera.js`**: live back camera through `getUserMedia`, falling back to an `<input capture>` picker. The frame is redrawn on a canvas at no more than 720 px and JPEG quality is lowered until the image is under ~380 KB (the server limit is 400 000 characters).
 - **GPS**: `watchPosition` with high accuracy, sent at most every 5 s. A Wake Lock keeps the screen on during play.
@@ -109,5 +109,5 @@ A ghost can't hide by turning location off:
 
 ## 10. Testing
 
-- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors and phone-width overflow. 39 checks.
+- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors, last-position memory, a phone in London hosting a game, and phone-width overflow. 42 checks.
 - The server functions were play-tested inside rolled-back transactions on the live database: auth, guards, pings, penalties, catches, win conditions, data wiping, the hardening fixes, no-GPS snapshots and cron-driven pings and time-up.
