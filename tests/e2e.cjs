@@ -162,6 +162,18 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   await london.click('#hHost'); await london.waitForSelector('.codebox');
   check('London phone hosts a lobby', await london.isVisible('#lStart'));
   check('London phone: no JS errors', london.errs.length === 0, london.errs.slice(0, 3).join(' | '));
+  // legal pages: linked from the app, readable at phone width, contact filled in
+  await london.evaluate(() => localStorage.removeItem('gr.session'));
+  await london.goto(URL); await london.waitForSelector('.legal a[href="/privacy"]');
+  await london.click('.legal a[href="/privacy"]'); await london.waitForSelector('h1');
+  check('Privacy page opens from home', /Privacy Policy/.test(await london.textContent('h1')));
+  check('Privacy page has a contact email', /mailto:[^%]+@/.test(await london.content()));
+  check('Privacy page fits phone width', await london.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await london.screenshot({ path: OUT + '/08-privacy.png', fullPage: true });
+  await london.click('footer a[href="/terms"]'); await london.waitForSelector('h1');
+  check('Terms page opens from Privacy', /Terms of Use/.test(await london.textContent('h1')));
+  check('Terms page fits phone width', await london.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await london.screenshot({ path: OUT + '/09-terms.png', fullPage: true });
   // horizontal overflow at phone width
   check('no horizontal scroll', await host.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   console.log(results.join('\n'));
