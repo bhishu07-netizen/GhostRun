@@ -110,6 +110,13 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   check('alerts link this phone to the game', [...pushSubs.values()].includes(ghostId));
   await sleep(3200);
   check('lobby shows alerts are on', /Alerts are on/.test(await ghost.textContent('#alertsBox')));
+  // the lobby is taller than a phone: it must take touches and keep its scroll across polls
+  check('lobby layer takes touches (iOS scroll)', (await host.evaluate(() => getComputedStyle(document.getElementById('screen')).pointerEvents)) === 'auto');
+  const scrolled = await host.evaluate(() => { const s = document.getElementById('screen'); s.scrollTop = 1e6; return s.scrollTop; });
+  await sleep(3500);
+  const after = await host.evaluate(() => document.getElementById('screen').scrollTop);
+  check('lobby scroll survives a poll', scrolled > 0 && Math.abs(after - scrolled) < 5, `${scrolled} -> ${after}`);
+  await host.evaluate(() => { document.getElementById('screen').scrollTop = 0; });
   // play zone: host draws 250 m around themselves; everyone sees it
   check('host gets the zone sizes plus Anywhere', (await host.$$('.zone-sizes .zchip')).length === 6);
   check('Anywhere is chosen when there is no zone', await host.isVisible('#zoneOff.on'));

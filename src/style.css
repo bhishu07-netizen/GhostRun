@@ -32,6 +32,9 @@ img { max-width: 100%; }
    (justify-content: flex-end would cut off the top of a tall card) */
 #screen > * { margin-top: auto; }
 #screen:empty { display: none; }
+/* while a card is showing, the screen layer takes touches so it can scroll
+   (iOS Safari won't touch-scroll an element with pointer-events: none) */
+#screen:not(:empty) { pointer-events: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .card { background: var(--card); border: 2px solid var(--line); border-radius: 26px; box-shadow: 0 10px 30px rgba(59, 42, 107, .14); }
 .sheet { pointer-events: auto; width: 100%; max-width: 460px; margin: 0 auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
 .sheet.center { align-items: center; text-align: center; }
