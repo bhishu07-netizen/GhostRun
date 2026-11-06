@@ -36,13 +36,15 @@ The profile (name, avatar, birth year) stays on the phone (`gr.profile`). The se
 | `pings` | each ping's ghost-position `snapshot` (`kind`: `ping` or `penalty`) | snapshots blanked at game end |
 | `hints` | photo hint due per ghost per ping: `deadline`, `photo` (JPEG data URL), `penalized` | wiped at game end |
 | `catches` | hunter's claim on a ghost: `pending → confirmed / rejected` | with its game |
+| `push_subs` | a device's push subscription (endpoint and keys) linked to a player and game | deleted when the game ends or the player leaves |
+| `push_outbox` | alerts waiting to be sent, one row per device | deleted as they're sent; dropped after 10 minutes |
 
 ## 4. Game lifecycle
 
 **Lobby.** The host is a hunter; everyone who joins starts as a ghost. A player can switch their own team; the host can move anyone. Max 12 players. Codes are 4 characters from an alphabet without 0/O/1/I.
 
 **Start** (`start_game`, host only, needs at least 1 hunter and 1 ghost):
-- Head start: 1 min in Quick, 3 min in the other modes. Hunters can't report catches during it.
+- Head start: 1 min in Quick, 5 min in the other modes. Hunters can't report catches during it.
 - `ends_at`: Quick is 15 min, 1 hour is 60 min, Endless has none.
 - `start_players` is frozen and sets the ping ladder.
 
@@ -102,12 +104,32 @@ A ghost can't hide by turning location off:
 - The ghost gets a banner of their own as soon as location is denied, or after 60 s without a fix.
 - No-GPS ghosts still get the photo-hint camera, and missing it still triggers a penalty.
 
-## 9. Known limits
+## 9. Alerts (web push)
+
+A website can't track location in the background. Instead, ghosts can lock their phone and get woken up in time for each ping.
+
+- **Turning on alerts (`src/push.js`, `public/sw.js`).** In the lobby or the game menu, a player taps **Turn on alerts**. The browser asks permission and subscribes to its push service with the public VAPID key from `.env`. `save_push` stores the subscription against the player's current game, and the app re-links the device to every game it joins. On iPhone, web push only works from the Home Screen app, so a Safari tab shows an "Add to Home Screen" hint instead.
+- **Queueing.** Game events call `_notify()`, which writes one row per subscribed device into `push_outbox`, all in English:
+  - start: "The hunt is on!";
+  - head start over: "Go hunt!" / "Hunters are coming";
+  - about a minute before a ping, to ghosts only: "Ping in 1 minute";
+  - at the ping: "Ping! Send your photo hint";
+  - catch claimed: "X says they caught you";
+  - catch rejected: "X says they escaped";
+  - end: "Hunters win!" / "Ghosts win!".
+- **Sending.** An `AFTER INSERT` trigger on `push_outbox` calls the `send-push` Edge Function through `pg_net`, and the 30-second cron job calls it again as a safety net. The function:
+  - checks the shared hook secret;
+  - reads the VAPID keys from Supabase Vault through `_push_config()`, which only the service role can call;
+  - claims and deletes the queued rows, then sends them;
+  - forgets subscriptions the push service reports as gone (404/410).
+- **Privacy.** Payloads are encrypted end to end, so the push service can't read them. Subscriptions are deleted when the game ends, and queued alerts older than 10 minutes are dropped.
+
+## 10. Known limits
 
 - **Catches are on the honour system.** The tagged ghost confirms their own catch.
 - **Host transfer is arbitrary on a tie.** If two players joined in the same instant, which one becomes host is not defined.
 
-## 10. Testing
+## 11. Testing
 
 - `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors, last-position memory, a phone in London hosting a game, and phone-width overflow. 42 checks.
 - The server functions were play-tested inside rolled-back transactions on the live database: auth, guards, pings, penalties, catches, win conditions, data wiping, the hardening fixes, no-GPS snapshots and cron-driven pings and time-up.
