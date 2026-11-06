@@ -6,7 +6,7 @@ const OUT = require('path').join(__dirname, 'screens'); require('fs').mkdirSync(
 const games = {}, players = {}, pushSubs = new Map(); let seq = 1, catchId = 1;
 const nowIso = () => new Date().toISOString();
 const err = (m) => ({ status: 400, body: { message: m } });
-const interval = (g) => Math.max(5, (g.start_players <= 5 ? 15 : g.start_players <= 7 ? 20 : 25) - 5 * g.catches);
+const interval = (g) => (g.rules || {}).ping || Math.max(5, (g.start_players <= 5 ? 15 : g.start_players <= 7 ? 20 : 25) - 5 * g.catches);
 function auth(a) { const p = players[a.p_player]; if (!p || p.secret !== a.p_secret) throw err('not allowed'); return p; }
 function newPlayer(g, name, avatar, team) { const id = 'p' + seq++; players[id] = { id, secret: 's' + id, game: g.id, name, avatar, team, alive: true, joined: seq }; return { player_id: id, secret: 's' + id, game_id: g.id, code: g.code }; }
 const gp = (g) => Object.values(players).filter((p) => p.game === g.id);
@@ -25,6 +25,7 @@ function tick(g) {
     g.pings.unshift({ seq: g.ping_seq, kind: 'ping', created_at: nowIso(), snapshot: gp(g).filter((p) => p.team === 'ghost').map((p) => { const l = g.locs[p.id]; return l ? { id: p.id, ...l, no_gps: Date.now() - +new Date(l.at) > 120000 } : { id: p.id, lat: null, lng: null, at: null, no_gps: true }; }) });
     gp(g).filter((p) => p.team === 'ghost').forEach((p) => g.hints.push({ player: p.id, seq: g.ping_seq, deadline: new Date(Date.now() + 60000).toISOString(), photo: null }));
     g.next_ping_at = new Date(Date.now() + interval(g) * 60000).toISOString();
+    if ((g.rules || {}).shrink && g.zone && g.zone.r > 100) g.zone = { ...g.zone, r: Math.max(100, Math.round(g.zone.r * 0.8)) };
   }
 }
 const api = {
@@ -32,18 +33,19 @@ const api = {
   join_game(a) { const g = Object.values(games).find((x) => x.code === a.p_code); if (!g) throw err('No game with that code.'); if (g.status !== 'lobby') throw err('That game already started.'); return newPlayer(g, a.p_name, a.p_avatar, 'ghost'); },
   set_team(a) { const me = auth(a); players[a.p_target].team = a.p_team; },
   set_mode(a) { const me = auth(a); games[me.game].mode = a.p_mode; },
-  start_game(a) { const me = auth(a); const g = games[me.game]; const ps = gp(g); if (!ps.some((p) => p.team === 'hunter') || !ps.some((p) => p.team === 'ghost')) throw err('You need at least 1 hunter and 1 ghost.'); Object.assign(g, { status: 'live', start_players: ps.length, started_at: nowIso(), hunt_starts_at: new Date(Date.now() + (g.mode === 'quick' ? 60000 : 300000)).toISOString(), ends_at: g.mode === 'hour' ? new Date(Date.now() + 3600000).toISOString() : null }); g.next_ping_at = g.mode !== 'quick' ? new Date(Date.now() + interval(g) * 60000).toISOString() : null; },
+  start_game(a) { const me = auth(a); const g = games[me.game]; const ps = gp(g); if (!ps.some((p) => p.team === 'hunter') || !ps.some((p) => p.team === 'ghost')) throw err('You need at least 1 hunter and 1 ghost.'); Object.assign(g, { status: 'live', start_players: ps.length, started_at: nowIso(), hunt_starts_at: new Date(Date.now() + (g.mode === 'quick' ? 1 : ((g.rules || {}).head || 5)) * 60000).toISOString(), ends_at: g.mode === 'hour' ? new Date(Date.now() + ((g.rules || {}).len || 60) * 60000).toISOString() : null }); g.next_ping_at = g.mode !== 'quick' ? new Date(Date.now() + interval(g) * 60000).toISOString() : null; },
   update_location(a) { const me = auth(a); const g = games[me.game]; if (g.status === 'live') g.locs[me.id] = { lat: a.p_lat, lng: a.p_lng, acc: a.p_acc, at: nowIso() }; },
   report_catch(a) { const me = auth(a); const g = games[me.game]; if (Date.now() < +new Date(g.hunt_starts_at)) throw err('Hold on, ghosts still have their head start.'); g.catchesList.push({ id: catchId++, hunter: me.id, ghost: a.p_ghost, status: 'pending', at: Date.now() }); },
   respond_catch(a) { const me = auth(a); const g = games[me.game]; const c = g.catchesList.find((x) => x.id === a.p_catch && x.ghost === me.id && x.status === 'pending'); if (!c) return; c.status = a.p_accept ? 'confirmed' : 'rejected'; if (a.p_accept) { Object.assign(me, { team: 'hunter', alive: false, caught_by: c.hunter }); g.catches++; tick(g); } },
   upload_hint(a) { const me = auth(a); const g = games[me.game]; const h = g.hints.find((x) => x.player === me.id && x.seq === a.p_seq && !x.photo); if (!/^data:image\/jpeg;base64,/.test(a.p_photo) || a.p_photo.length > 400000) throw err('Photo must be a JPEG under 300 KB.'); if (!h) throw err('Too late'); h.photo = a.p_photo; h.uploaded_at = nowIso(); },
   end_game(a) { const me = auth(a); end(games[me.game], 'ghosts'); },
+  set_rules(a) { const me = auth(a); const g = games[me.game]; if (g.host_id !== me.id) throw err('Only the host can change the rules.'); if (g.status !== 'lobby') throw err('locked'); g.rules = { head: a.p_head, len: a.p_len, ping: a.p_ping, shrink: !!a.p_shrink }; },
   set_zone(a) { const me = auth(a); const g = games[me.game]; if (g.host_id !== me.id) throw err('Only the host can set the play zone.'); if (g.status !== 'lobby') throw err('The play zone is locked once the game starts.'); g.zone = a.p_radius == null ? null : { lat: a.p_lat, lng: a.p_lng, r: a.p_radius }; },
   save_push(a) { const me = auth(a); if (!/^https:\/\//.test(a.p_sub && a.p_sub.endpoint)) throw err('bad sub'); pushSubs.set(a.p_sub.endpoint, me.id); },
   leave_game(a) { const me = auth(a); delete players[me.id]; const g = games[me.game]; if (g.host_id === me.id) { const n = gp(g)[0]; g.host_id = n && n.id; } if (g.status === 'live') tick(g); },
   get_state(a) {
     const me = auth(a); const g = games[me.game]; tick(g);
-    const res = { now: nowIso(), game: { id: g.id, code: g.code, mode: g.mode, status: g.status, host_id: g.host_id, started_at: g.started_at, hunt_starts_at: g.hunt_starts_at, ends_at: g.ends_at, next_ping_at: g.next_ping_at, catches: g.catches, ping_seq: g.ping_seq, winner: g.winner, interval_min: g.mode === 'quick' || g.status === 'lobby' ? null : interval(g), zone: g.zone || null },
+    const res = { now: nowIso(), game: { id: g.id, code: g.code, mode: g.mode, status: g.status, host_id: g.host_id, started_at: g.started_at, hunt_starts_at: g.hunt_starts_at, ends_at: g.ends_at, next_ping_at: g.next_ping_at, catches: g.catches, ping_seq: g.ping_seq, winner: g.winner, interval_min: g.mode === 'quick' || g.status === 'lobby' ? null : interval(g), zone: g.zone || null, rules: { head: null, len: null, ping: null, shrink: false, ...(g.rules || {}) } },
       me: { id: me.id, name: me.name, avatar: me.avatar, team: me.team, out_since: me.out_since || null },
       players: gp(g).map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, team: p.team, caught: !p.alive, caught_by: p.caught_by || null, online: true })),
       teammates: gp(g).filter((p) => p.team === me.team && p.id !== me.id && g.locs[p.id]).map((p) => ({ id: p.id, ...g.locs[p.id] })) };
@@ -109,19 +111,33 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   await sleep(3200);
   check('lobby shows alerts are on', /Alerts are on/.test(await ghost.textContent('#alertsBox')));
   // play zone: host draws 250 m around themselves; everyone sees it
-  check('host gets the zone sizes', (await host.$$('.zone-sizes .zchip')).length === 4);
+  check('host gets the zone sizes plus Anywhere', (await host.$$('.zone-sizes .zchip')).length === 6);
+  check('Anywhere is chosen when there is no zone', await host.isVisible('#zoneOff.on'));
+  check('ghost sees Anywhere before a zone is set', /Anywhere/.test(await ghost.textContent('.zone-pill')));
   await host.click('.zchip[data-r="250"]'); await sleep(800);
   const gz = Object.values(games)[0].zone;
   check('zone set around the host', gz && gz.r === 250 && Math.abs(gz.lat - 30.7701) < 0.001, JSON.stringify(gz));
   await sleep(3200);
   check('ghost sees the zone in the lobby', /Play zone: 250 m/.test(await ghost.textContent('.zone-pill')));
   check('host sees the chosen size', await host.isVisible('.zchip.on[data-r="250"]'));
+  // custom rules: 2 min head start, fixed 5 min pings, shrinking zone
+  check('host gets the rules box', await host.isVisible('#rulesBox'));
+  await host.click('[data-rule="head"][data-v="2"]'); await sleep(700);
+  await host.click('[data-rule="ping"][data-v="5"]'); await sleep(700);
+  await host.check('#ruleShrink'); await sleep(700);
+  const gr = Object.values(games)[0].rules;
+  check('rules saved', gr && gr.head === 2 && gr.ping === 5 && gr.shrink === true, JSON.stringify(gr));
+  await sleep(3200);
+  const rp = await ghost.textContent('.rules-pill');
+  check('ghost sees the rules', /2 min head start/.test(rp) && /every 5 min/.test(rp) && /shrinks/.test(rp), rp);
+  await host.screenshot({ path: OUT + '/02c-lobby-rules.png', fullPage: true });
   await host.screenshot({ path: OUT + '/02b-lobby-zone.png' });
   await host.screenshot({ path: OUT + '/02-lobby-host.png' });
   await host.click('#lStart'); const liveAt = Date.now(); await sleep(3500);
   check('host HUD live as HUNTER', (await host.textContent('.role')) === 'HUNTER');
   check('ghost HUD live as GHOST', (await ghost.textContent('.role')) === 'GHOST');
   check('head-start banner', /Hunters start in/.test(await ghost.textContent('.hud')));
+  check('head start follows the rules (2 min)', /Hunters start in <b[^>]*>[12]:\d\d/.test(await ghost.innerHTML('.hud')));
   // the display can lag up to 1 s and rounds to whole seconds, so allow 2.5 s for it to move
   const c1 = await ghost.textContent('[data-t="head"]');
   await ghost.waitForFunction((v) => document.querySelector('[data-t="head"]').textContent !== v, c1, { timeout: 2500 }).catch(() => {});
@@ -145,6 +161,8 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   const g = Object.values(games)[0]; g.hunt_starts_at = new Date(Date.now() - 1000).toISOString(); g.next_ping_at = new Date(Date.now() - 1000).toISOString();
   await sleep(3800);
   check('ghost camera opens on ping', await ghost.isVisible('.cam'));
+  check('zone shrank 20% at the ping', Object.values(games)[0].zone.r === 200, String(Object.values(games)[0].zone.r));
+  check('ghost told the zone shrank', /zone shrank to 200 m/.test(await ghost.textContent('#toast')));
   const g0 = Object.values(games)[0];
   check('GPS-off ghost is in the ping snapshot as no_gps', g0.pings[0].snapshot.some((x) => x.no_gps && x.lat == null));
   check('hunter warned about GPS-off ghost', /No GPS from Kabir/.test(await host.textContent('.hud')));
