@@ -44,7 +44,7 @@ The profile (name, avatar, birth year) stays on the phone (`gr.profile`). The se
 **Lobby.** The host is a hunter; everyone who joins starts as a ghost. A player can switch their own team; the host can move anyone. Max 12 players. Codes are 4 characters from an alphabet without 0/O/1/I.
 
 **Start** (`start_game`, host only, needs at least 1 hunter and 1 ghost):
-- Head start: 1 min in Quick, 5 min in the other modes. Hunters can't report catches during it.
+- Head start: 1 min in Quick; in the other modes 5 min, or 2/10 min if the host changed it. Hunters can't report catches during it.
 - `ends_at`: Quick is 15 min, 1 hour is 60 min, Endless has none.
 - `start_players` is frozen and sets the ping ladder.
 
@@ -63,6 +63,13 @@ The profile (name, avatar, birth year) stays on the phone (`gr.profile`). The se
 - `_tick` runs, so the last catch ends the game right away.
 
 On no, the hunter gets an "escaped" toast and must wait 30 s before claiming the same ghost again.
+
+**Custom rules** (`set_rules`, host only, lobby only; Quick mode keeps its fixed rules):
+- **Head start:** 2, 5 or 10 minutes.
+- **Game length (1-hour mode only):** 30 minutes, 1 hour or 2 hours. The lobby and results then name the mode by its real length.
+- **Pings:** Auto (the ladder above) or a fixed gap of 5, 10, 15 or 20 minutes, which ignores catches (`_interval_min` prefers it).
+- **Shrinking zone (only with a play zone):** at every ping, the zone gets 20% smaller, never below 100 m. Everyone gets an alert ("The zone is shrinking") and a toast.
+- **Defaults:** `null` means "use the default", so games without custom rules behave exactly as before.
 
 **Play zone** (`set_zone`, host only, lobby only):
 - **Setting it:** the host taps a size (250 m, 500 m, 1 km or 2 km), and the zone becomes a circle around where they're standing. The circle is drawn on every player's map.
@@ -139,5 +146,5 @@ A website can't track location in the background. Instead, ghosts can lock their
 
 ## 11. Testing
 
-- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors, last-position memory, a phone in London hosting a game, alerts, the play zone (setting it, warning outside, clearing back inside), and phone-width overflow. 60 checks.
+- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors, last-position memory, a phone in London hosting a game, alerts, the play zone (setting it, warning outside, clearing back inside), custom rules (saved, shown to players, 2-minute head start) and the zone shrinking at a ping, and phone-width overflow. 66 checks.
 - The server functions were play-tested inside rolled-back transactions on the live database: auth, guards, pings, penalties, catches, win conditions, data wiping, the hardening fixes, no-GPS snapshots and cron-driven pings and time-up.

@@ -210,6 +210,10 @@ function detectEvents(prev, st) {
     buzz([60, 40, 60]);
     toast(st.me.team === 'hunter' ? 'Ping! Ghost positions updated.' : 'Ping! Hunters just saw where you are. Move!');
   }
+  if (prev.game.zone && st.game.zone && st.game.zone.r < prev.game.zone.r) {
+    buzz([120, 60, 120]);
+    toast(`The zone shrank to ${zoneLabel(st.game.zone.r)}. Stay inside!`);
+  }
 }
 
 function caughtSplash(text, left) {
@@ -241,15 +245,17 @@ function renderLobby() {
         <b>${esc(g.code)}</b>
         <button class="btn soft slim" id="lShare">Invite friends</button>
       </div>
-      ${isHost ? `<div class="modes" role="radiogroup" aria-label="Game mode">${Object.entries(MODES).map(([k, m]) => `<button class="mode ${k === g.mode ? 'on' : ''}" data-mode="${k}" role="radio" aria-checked="${k === g.mode}"><b>${m.label}</b><span>${m.sub}</span></button>`).join('')}</div>`
-        : `<p class="pill">${MODES[g.mode].label} · ${MODES[g.mode].sub}</p>`}
+      ${isHost ? `<div class="modes" role="radiogroup" aria-label="Game mode">${Object.entries(MODES).map(([k, m]) => `<button class="mode ${k === g.mode ? 'on' : ''}" data-mode="${k}" role="radio" aria-checked="${k === g.mode}"><b>${modeLabel(k, g)}</b><span>${m.sub}</span></button>`).join('')}</div>`
+        : `<p class="pill">${modeLabel(g.mode, g)} · ${MODES[g.mode].sub}</p>`}
       <div class="teams">
         <div class="team hunt"><h3>Hunters · ${hunters.length}</h3>${list(hunters)}</div>
         <div class="team ghost"><h3>Ghosts · ${ghosts.length}</h3>${list(ghosts)}</div>
       </div>
       <p class="small muted">${isHost ? 'Tap a player to switch their team.' : 'Tap yourself to switch team.'}</p>
-      ${g.mode === 'quick' ? '<p class="small">Quick mode: no pings. Pure hide and seek.</p>'
+      ${g.mode === 'quick' ? '<p class="small">Quick mode: 1 minute head start, 15 minutes, no pings. Pure hide and seek.</p>'
+        : rulesOf(g).ping ? `<p class="small">Pings every <b>${rulesOf(g).ping} min</b>, whatever the catches.</p>`
         : `<div class="ladder"><span>Pings for ${n} players</span>${ladder.map((m, i) => `<b>${m} min<em>${i === 0 ? 'start' : `${i} catch${i > 1 ? 'es' : ''}`}</em></b>`).join('')}</div>`}
+      ${rulesBox(isHost, g)}
       ${zoneBox(isHost, g.zone)}
       ${alertsBox()}
       ${isHost ? '<button class="btn primary" id="lStart">Start the hunt</button>' : '<p class="waiting">Waiting for the host to start…</p>'}
@@ -258,6 +264,7 @@ function renderLobby() {
   const err = screen.querySelector('#lErr');
   wireAlerts(screen);
   wireZone(screen, err);
+  wireRules(screen, err);
   showLobbyZone(g.zone);
   screen.querySelector('#lLeave').onclick = leaveGame;
   screen.querySelector('#lShare').onclick = async () => {
@@ -393,7 +400,7 @@ function renderLive() {
     </div>
     <div class="hud-strip">
       <span><b>${ghostsLeft}</b> ghost${ghostsLeft === 1 ? '' : 's'} left</span>
-      ${pingLeft !== null ? `<span>Next ping <b data-t="ping">${fmt(pingLeft)}</b> · every ${g.interval_min}m</span>` : `<span>${MODES[g.mode].label} mode</span>`}
+      ${pingLeft !== null ? `<span>Next ping <b data-t="ping">${fmt(pingLeft)}</b> · every ${g.interval_min}m</span>` : `<span>${modeLabel(g.mode, g)} mode</span>`}
     </div>
     ${zoneBanner}
     ${headLeft > 0 ? `<div class="banner">${me.team === 'hunter' ? `Ghosts are hiding. You can hunt in <b data-t="head">${fmt(headLeft)}</b>` : `Run and hide! Hunters start in <b data-t="head">${fmt(headLeft)}</b>`}</div>` : ''}
@@ -521,6 +528,51 @@ function openMenu() {
   if (end) end.onclick = async () => { modal.innerHTML = ''; await rpc('end_game', auth()).catch((x) => toast(x.message)); poll(); };
 }
 
+// ------------------------------------------------------------------ custom rules (lobby)
+const rulesOf = (g) => g.rules || { head: null, len: null, ping: null, shrink: false };
+const lenLabel = (m) => (m === 120 ? '2 hours' : m === 30 ? '30 min' : '1 hour');
+// the timed mode is called by its real length once the host changes it
+const modeLabel = (k, g) => (k === 'hour' ? lenLabel(rulesOf(g).len || 60) : MODES[k].label);
+function seg(name, options, current, unit) {
+  return `<div class="seg" role="group" aria-label="${name}">${options.map(([v, label]) =>
+    `<button class="zchip ${String(current) === String(v) ? 'on' : ''}" data-rule="${name}" data-v="${v}">${label}${unit && v !== 'auto' ? `<small> ${unit}</small>` : ''}</button>`).join('')}</div>`;
+}
+function rulesBox(isHost, g) {
+  if (g.mode === 'quick') return '';
+  const r = rulesOf(g);
+  if (!isHost) {
+    const bits = [`${r.head || 5} min head start`, r.ping ? `pings every ${r.ping} min` : 'pings speed up with catches'];
+    if (g.mode === 'hour') bits.splice(1, 0, lenLabel(r.len || 60));
+    if (r.shrink && g.zone) bits.push('the zone shrinks at every ping');
+    return `<p class="pill rules-pill">Rules: ${bits.join(' · ')}</p>`;
+  }
+  return `<div class="rulesbox" id="rulesBox">
+      <p><b>Rules</b></p>
+      <div class="rule"><span>Head start</span>${seg('head', [[2, '2'], [5, '5'], [10, '10']], r.head || 5, 'min')}</div>
+      ${g.mode === 'hour' ? `<div class="rule"><span>Game length</span>${seg('len', [[30, '30 min'], [60, '1 hour'], [120, '2 hours']], r.len || 60)}</div>` : ''}
+      <div class="rule"><span>Pings</span>${seg('ping', [['auto', 'Auto'], [5, '5'], [10, '10'], [15, '15'], [20, '20']], r.ping || 'auto', 'min')}</div>
+      <p class="small muted">Auto: pings start at 15 to 25 minutes depending on players, and get 5 minutes faster with every catch.</p>
+      ${g.zone ? `<label class="toggle"><input type="checkbox" id="ruleShrink" ${r.shrink ? 'checked' : ''}> <span><b>Shrinking zone</b> · the zone gets 20% smaller at every ping</span></label>` : ''}
+    </div>`;
+}
+function wireRules(root, err) {
+  const g = S.game, r = rulesOf(g);
+  const send = async (next) => {
+    try {
+      await rpc('set_rules', { ...auth(), p_head: next.head ?? null, p_len: next.len ?? null, p_ping: next.ping ?? null, p_shrink: !!next.shrink });
+      poll();
+    } catch (x) { err.textContent = x.message; err.hidden = false; }
+  };
+  root.querySelectorAll('[data-rule]').forEach((b) => b.onclick = () => {
+    const v = b.dataset.v === 'auto' ? null : +b.dataset.v;
+    const defaults = { head: 5, len: 60 }; // store null for the default so the server keeps its own
+    const key = b.dataset.rule;
+    send({ ...r, [key]: v === defaults[key] ? null : v });
+  });
+  const sh = root.querySelector('#ruleShrink');
+  if (sh) sh.onchange = () => send({ ...r, shrink: sh.checked });
+}
+
 // ------------------------------------------------------------------ play zone (lobby)
 let wasOutside = false, zoneBusy = false;
 // seconds a ghost has left before the server shows them to the hunters
@@ -606,7 +658,7 @@ function renderResults() {
     <section class="card sheet center">
       <img class="sticker" src="/e/gg.png" alt="">
       <h1 class="logo big ${g.winner === 'hunters' ? 'pink' : 'blue'}">${g.winner === 'hunters' ? 'HUNTERS WIN!' : 'GHOSTS WIN!'}</h1>
-      <p class="muted">${g.catches} catch${g.catches === 1 ? '' : 'es'} · ${MODES[g.mode].label} mode</p>
+      <p class="muted">${g.catches} catch${g.catches === 1 ? '' : 'es'} · ${modeLabel(g.mode, g)} mode</p>
       <div class="titles">
         ${survivors.map((p) => `<div class="title blue"><img src="/a/${esc(p.avatar)}.png" alt=""><span><b>Last Ghost</b>${esc(p.name)} was never caught</span></div>`).join('')}
         ${top ? `<div class="title pink"><img src="/a/${esc(top.avatar)}.png" alt=""><span><b>Bloodhound</b>${esc(top.name)} · ${counts[topId]} catch${counts[topId] === 1 ? '' : 'es'}</span></div>` : ''}
