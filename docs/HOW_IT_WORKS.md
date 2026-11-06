@@ -66,7 +66,6 @@ On no, the hunter gets an "escaped" toast and must wait 30 s before claiming the
 
 **Custom rules** (`set_rules`, host only, lobby only; Quick mode keeps its fixed rules):
 - **Head start:** 2, 5 or 10 minutes.
-- **Game length (1-hour mode only):** 30 minutes, 1 hour or 2 hours. The lobby and results then name the mode by its real length.
 - **Pings:** Auto (the ladder above) or a fixed gap of 5, 10, 15 or 20 minutes, which ignores catches (`_interval_min` prefers it).
 - **Shrinking zone (only with a play zone):** at every ping, the zone gets 20% smaller, never below 100 m. Everyone gets an alert ("The zone is shrinking") and a toast.
 - **Defaults:** `null` means "use the default", so games without custom rules behave exactly as before.

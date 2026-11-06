@@ -228,6 +228,7 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   await london.goto(URL); await london.fill('#pName', 'Ollie'); await london.click('[data-av="scout"]'); await london.selectOption('#pYear', '2000'); await london.click('#pGo');
   await london.click('#hHost'); await london.waitForSelector('.codebox');
   check('London phone hosts a lobby', await london.isVisible('#lStart'));
+  check('1-hour lobby has no separate game-length rule', !/Game length/.test(await london.textContent('#rulesBox')));
   // an iPhone in a Safari tab can't get web push: show how to add Ghostrun to the Home Screen
   const iphone = await mk(40.7128, -74.006, 'iPhone 13');
   await iphone.goto(URL); await iphone.fill('#pName', 'Maya'); await iphone.click('[data-av="spotter"]'); await iphone.selectOption('#pYear', '2001'); await iphone.click('#pGo');
