@@ -224,6 +224,7 @@ function caughtSplash(text, left) {
 }
 
 // ------------------------------------------------------------------ lobby
+let lobbyHtml = '';
 function renderLobby() {
   hud.hidden = true; map.setOrbit(!S.game.zone); // hold still over the zone once there is one
   const g = S.game, me = S.me, isHost = g.host_id === me.id;
@@ -233,7 +234,7 @@ function renderLobby() {
   const ladder = [0, 1, 2, 3].map((c) => Math.max(5, base - 5 * c));
   const list = (arr) => arr.map((p) => `<button class="pl ${p.id === me.id ? 'mine' : ''}" data-id="${p.id}" ${(!isHost && p.id !== me.id) ? 'disabled' : ''}>
       <img src="/a/${esc(p.avatar)}.png" alt=""><span>${esc(p.id === me.id ? 'You' : p.name)}${p.id === g.host_id ? ' · host' : ''}</span></button>`).join('') || '<p class="muted small">Nobody yet</p>';
-  screen.innerHTML = `
+  const html = `
     <section class="card sheet">
       <div class="row between">
         <button class="chip" id="lLeave">Leave</button>
@@ -261,9 +262,16 @@ function renderLobby() {
       ${isHost ? '<button class="btn primary" id="lStart">Start the hunt</button>' : '<p class="waiting">Waiting for the host to start…</p>'}
       <p class="err" id="lErr" hidden></p>
     </section>`;
+  // The lobby polls every 3 s. Only rebuild it when something changed, and keep the scroll
+  // position when it does, so scrolling (and an error message) isn't wiped mid-gesture.
+  if (html === lobbyHtml && screen.querySelector('#lLeave')) { showLobbyZone(g.zone); return; }
+  lobbyHtml = html;
+  const y = screen.scrollTop;
+  screen.innerHTML = html;
+  screen.scrollTop = y;
   const err = screen.querySelector('#lErr');
   wireAlerts(screen);
-  wireZone(screen, err);
+  wireZone(screen);
   wireRules(screen, err);
   showLobbyZone(g.zone);
   screen.querySelector('#lLeave').onclick = leaveGame;
@@ -591,8 +599,9 @@ function zoneBox(isHost, z) {
       <p class="small muted">${zoneBusy ? 'Finding you…' : 'Pick a size to draw the zone around where you\'re standing. Ghosts who stay outside it get shown to the hunters. Anywhere means no zone.'}</p>
     </div>`;
 }
-function wireZone(root, err) {
-  const fail = (m) => { err.textContent = m; err.hidden = false; };
+function wireZone(root) {
+  // look the error box up when needed: the lobby may have been rebuilt since wiring
+  const fail = (m) => { const e = screen.querySelector('#lErr'); if (e) { e.textContent = m; e.hidden = false; } };
   root.querySelectorAll('.zone-sizes [data-r]').forEach((b) => b.onclick = () => {
     if (!('geolocation' in navigator)) return fail('This phone can\'t share its location, so it can\'t set a zone.');
     zoneBusy = true; renderLobby();
