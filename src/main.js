@@ -6,6 +6,7 @@ import './style.css';
 import { rpc, profile, session, auth, lastPos } from './api.js';
 import { createMap, avatarMarker, circle, WORLD_VIEW, localView } from './map.js';
 import { openCamera } from './camera.js';
+import { registerWorker, alertState, turnOnAlerts, linkToGame } from './push.js';
 
 const AVATARS = [
   ['hunter', 'The Hunter'], ['ghost', 'The Ghost'], ['runner', 'The Runner'], ['spotter', 'The Spotter'],
@@ -162,6 +163,7 @@ async function poll() {
       if (!photosSince || h.uploaded_at > photosSince) photosSince = h.uploaded_at;
     });
     const prev = S; S = st;
+    if (st.game.status !== 'ended') linkToGame().catch(() => { /* alerts are a bonus */ });
     detectEvents(prev, st);
     if (st.game.status === 'lobby') renderLobby();
     else if (st.game.status === 'live') renderLive();
@@ -243,10 +245,12 @@ function renderLobby() {
       <p class="small muted">${isHost ? 'Tap a player to switch their team.' : 'Tap yourself to switch team.'}</p>
       ${g.mode === 'quick' ? '<p class="small">Quick mode: no pings. Pure hide and seek.</p>'
         : `<div class="ladder"><span>Pings for ${n} players</span>${ladder.map((m, i) => `<b>${m} min<em>${i === 0 ? 'start' : `${i} catch${i > 1 ? 'es' : ''}`}</em></b>`).join('')}</div>`}
+      ${alertsBox()}
       ${isHost ? '<button class="btn primary" id="lStart">Start the hunt</button>' : '<p class="waiting">Waiting for the host to start…</p>'}
       <p class="err" id="lErr" hidden></p>
     </section>`;
   const err = screen.querySelector('#lErr');
+  wireAlerts(screen);
   screen.querySelector('#lLeave').onclick = leaveGame;
   screen.querySelector('#lShare').onclick = async () => {
     const text = `Join my Ghostrun hunt! Code: ${g.code} ${location.origin}`;
@@ -456,15 +460,41 @@ function openMenu() {
   const isHost = S.game.host_id === S.me.id;
   modal.innerHTML = `<div class="sheet-modal card" role="dialog" aria-modal="true" aria-label="Game menu">
     <h2>Game ${esc(S.game.code)}</h2>
+    ${alertsBox()}
     <button class="btn soft" id="mCenter">Center on me</button>
     ${isHost ? '<button class="btn soft" id="mEnd">End game for everyone</button>' : ''}
     <button class="btn soft" id="mLeave">Leave game</button>
     <button class="btn primary" id="mClose">Back to the hunt</button></div>`;
   modal.querySelector('#mClose').onclick = () => { modal.innerHTML = ''; };
+  wireAlerts(modal);
   modal.querySelector('#mCenter').onclick = () => { modal.innerHTML = ''; if (myPos) map.flyTo({ center: myPos, zoom: 17.2 }); else toast('Waiting for your GPS…'); };
   modal.querySelector('#mLeave').onclick = leaveGame;
   const end = modal.querySelector('#mEnd');
   if (end) end.onclick = async () => { modal.innerHTML = ''; await rpc('end_game', auth()).catch((x) => toast(x.message)); poll(); };
+}
+
+// ------------------------------------------------------------------ alerts
+// Lobby and game-menu control for push alerts. What it shows depends on the device.
+function alertsBox() {
+  const st = alertState();
+  if (st === 'on') return '<p class="alerts on" id="alertsBox"><b>Alerts are on.</b> Lock your phone while you hide; we\'ll buzz you a minute before each ping.</p>';
+  if (st === 'off') return `<div class="alerts" id="alertsBox"><p><b>Get a buzz before each ping.</b> Lock your phone while you hide and we'll wake you up in time.</p><button class="btn soft slim" id="alertsOn">Turn on alerts</button></div>`;
+  if (st === 'ios-home') return '<p class="alerts" id="alertsBox"><b>Want ping alerts on iPhone?</b> Tap Share, then <b>Add to Home Screen</b>, and open Ghostrun from that icon.</p>';
+  if (st === 'blocked') return '<p class="alerts" id="alertsBox">Alerts are blocked. Allow notifications for Ghostrun in your phone settings to get ping alerts.</p>';
+  return ''; // browser can't do web push: say nothing, the game works without it
+}
+function wireAlerts(root) {
+  const b = root.querySelector('#alertsOn');
+  if (!b) return;
+  b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Turning on…';
+    try {
+      const st = await turnOnAlerts();
+      toast(st === 'on' ? 'Alerts on. We\'ll buzz you before each ping.' : 'Alerts stay off. You can still play.');
+    } catch { toast('Couldn\'t turn on alerts on this device. You can still play.'); }
+    const box = root.querySelector('#alertsBox');
+    if (box) box.outerHTML = alertsBox();
+  };
 }
 
 // ------------------------------------------------------------------ results
@@ -492,6 +522,7 @@ function renderResults() {
 }
 
 // ------------------------------------------------------------------ boot
+registerWorker();
 if (!profile.get()) renderProfile();
 else if (session.get()) enterGame();
 else renderHome();

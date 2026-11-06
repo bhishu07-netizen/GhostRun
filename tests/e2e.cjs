@@ -3,7 +3,7 @@
 const { chromium, devices } = require('playwright');
 const OUT = require('path').join(__dirname, 'screens'); require('fs').mkdirSync(OUT, { recursive: true });
 // ---------- mock backend mirroring the Supabase functions ----------
-const games = {}, players = {}; let seq = 1, catchId = 1;
+const games = {}, players = {}, pushSubs = new Map(); let seq = 1, catchId = 1;
 const nowIso = () => new Date().toISOString();
 const err = (m) => ({ status: 400, body: { message: m } });
 const interval = (g) => Math.max(5, (g.start_players <= 5 ? 15 : g.start_players <= 7 ? 20 : 25) - 5 * g.catches);
@@ -27,12 +27,13 @@ const api = {
   join_game(a) { const g = Object.values(games).find((x) => x.code === a.p_code); if (!g) throw err('No game with that code.'); if (g.status !== 'lobby') throw err('That game already started.'); return newPlayer(g, a.p_name, a.p_avatar, 'ghost'); },
   set_team(a) { const me = auth(a); players[a.p_target].team = a.p_team; },
   set_mode(a) { const me = auth(a); games[me.game].mode = a.p_mode; },
-  start_game(a) { const me = auth(a); const g = games[me.game]; const ps = gp(g); if (!ps.some((p) => p.team === 'hunter') || !ps.some((p) => p.team === 'ghost')) throw err('You need at least 1 hunter and 1 ghost.'); Object.assign(g, { status: 'live', start_players: ps.length, started_at: nowIso(), hunt_starts_at: new Date(Date.now() + 180000).toISOString(), ends_at: g.mode === 'hour' ? new Date(Date.now() + 3600000).toISOString() : null }); g.next_ping_at = g.mode !== 'quick' ? new Date(Date.now() + interval(g) * 60000).toISOString() : null; },
+  start_game(a) { const me = auth(a); const g = games[me.game]; const ps = gp(g); if (!ps.some((p) => p.team === 'hunter') || !ps.some((p) => p.team === 'ghost')) throw err('You need at least 1 hunter and 1 ghost.'); Object.assign(g, { status: 'live', start_players: ps.length, started_at: nowIso(), hunt_starts_at: new Date(Date.now() + (g.mode === 'quick' ? 60000 : 300000)).toISOString(), ends_at: g.mode === 'hour' ? new Date(Date.now() + 3600000).toISOString() : null }); g.next_ping_at = g.mode !== 'quick' ? new Date(Date.now() + interval(g) * 60000).toISOString() : null; },
   update_location(a) { const me = auth(a); const g = games[me.game]; if (g.status === 'live') g.locs[me.id] = { lat: a.p_lat, lng: a.p_lng, acc: a.p_acc, at: nowIso() }; },
   report_catch(a) { const me = auth(a); const g = games[me.game]; if (Date.now() < +new Date(g.hunt_starts_at)) throw err('Hold on, ghosts still have their head start.'); g.catchesList.push({ id: catchId++, hunter: me.id, ghost: a.p_ghost, status: 'pending', at: Date.now() }); },
   respond_catch(a) { const me = auth(a); const g = games[me.game]; const c = g.catchesList.find((x) => x.id === a.p_catch && x.ghost === me.id && x.status === 'pending'); if (!c) return; c.status = a.p_accept ? 'confirmed' : 'rejected'; if (a.p_accept) { Object.assign(me, { team: 'hunter', alive: false, caught_by: c.hunter }); g.catches++; tick(g); } },
   upload_hint(a) { const me = auth(a); const g = games[me.game]; const h = g.hints.find((x) => x.player === me.id && x.seq === a.p_seq && !x.photo); if (!/^data:image\/jpeg;base64,/.test(a.p_photo) || a.p_photo.length > 400000) throw err('Photo must be a JPEG under 300 KB.'); if (!h) throw err('Too late'); h.photo = a.p_photo; h.uploaded_at = nowIso(); },
   end_game(a) { const me = auth(a); end(games[me.game], 'ghosts'); },
+  save_push(a) { const me = auth(a); if (!/^https:\/\//.test(a.p_sub && a.p_sub.endpoint)) throw err('bad sub'); pushSubs.set(a.p_sub.endpoint, me.id); },
   leave_game(a) { const me = auth(a); delete players[me.id]; const g = games[me.game]; if (g.host_id === me.id) { const n = gp(g)[0]; g.host_id = n && n.id; } if (g.status === 'live') tick(g); },
   get_state(a) {
     const me = auth(a); const g = games[me.game]; tick(g);
@@ -61,7 +62,17 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
 
 (async () => {
   const browser = await chromium.launch();
-  const mk = async (lat, lng) => { const ctx = await browser.newContext({ ...devices['Pixel 7'], ...(lat ? { geolocation: { latitude: lat, longitude: lng, accuracy: 10 }, permissions: ['geolocation'] } : { permissions: [] }) }); await wire(ctx); const page = await ctx.newPage(); const errs = []; page.on('pageerror', (e) => errs.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' && !/openfreemap|Failed to load resource|ERR_FAILED|AJAXError/i.test(m.text())) errs.push(m.text()); }); page.errs = errs; return page; };
+  const mk = async (lat, lng, device = 'Pixel 7') => { const ctx = await browser.newContext({ ...devices[device], ...(lat ? { geolocation: { latitude: lat, longitude: lng, accuracy: 10 }, permissions: ['geolocation'] } : { permissions: [] }) }); await wire(ctx);
+    // headless Chromium has no push service: fake the permission prompt and the subscription
+    await ctx.addInitScript(() => {
+      if (!window.Notification || !window.PushManager) return;
+      let perm = 'default';
+      Object.defineProperty(Notification, 'permission', { get: () => perm });
+      Notification.requestPermission = async () => { perm = 'granted'; return perm; };
+      const sub = { endpoint: 'https://push.example.test/' + Math.random().toString(36).slice(2), toJSON() { return { endpoint: this.endpoint, keys: { p256dh: 'BKtestkey', auth: 'authtest' } }; } };
+      PushManager.prototype.getSubscription = async () => null;
+      PushManager.prototype.subscribe = async () => sub;
+    }); const page = await ctx.newPage(); const errs = []; page.on('pageerror', (e) => errs.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' && !/openfreemap|Failed to load resource|ERR_FAILED|AJAXError/i.test(m.text())) errs.push(m.text()); }); page.errs = errs; return page; };
   const host = await mk(30.7701, 76.5759), ghost = await mk(30.7712, 76.5771), dark = await mk(null);
   const URL = 'http://localhost:4173/';
   for (const [pg, name, av] of [[host, 'Bhishu', 'hunter'], [ghost, 'Riya', 'sneak'], [dark, 'Kabir', 'shadow']]) {
@@ -83,6 +94,14 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   check('host lobby lists all 3 players', (await host.$$('.pl')).length === 3);
   check('lobby shows ping ladder for endless', await host.isVisible('.ladder'));
   check('ghost sees waiting text', await ghost.isVisible('.waiting'));
+  // alerts: offered in the lobby, one tap links this phone to the game
+  check('service worker registered', await host.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => !!r)));
+  check('lobby offers Turn on alerts', await ghost.isVisible('#alertsOn'));
+  await ghost.click('#alertsOn'); await sleep(600);
+  const ghostId = JSON.parse(await ghost.evaluate(() => localStorage.getItem('gr.session'))).player_id;
+  check('alerts link this phone to the game', [...pushSubs.values()].includes(ghostId));
+  await sleep(3200);
+  check('lobby shows alerts are on', /Alerts are on/.test(await ghost.textContent('#alertsBox')));
   await host.screenshot({ path: OUT + '/02-lobby-host.png' });
   await host.click('#lStart'); const liveAt = Date.now(); await sleep(3500);
   check('host HUD live as HUNTER', (await host.textContent('.role')) === 'HUNTER');
@@ -161,6 +180,12 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   await london.goto(URL); await london.fill('#pName', 'Ollie'); await london.click('[data-av="scout"]'); await london.selectOption('#pYear', '2000'); await london.click('#pGo');
   await london.click('#hHost'); await london.waitForSelector('.codebox');
   check('London phone hosts a lobby', await london.isVisible('#lStart'));
+  // an iPhone in a Safari tab can't get web push: show how to add Ghostrun to the Home Screen
+  const iphone = await mk(40.7128, -74.006, 'iPhone 13');
+  await iphone.goto(URL); await iphone.fill('#pName', 'Maya'); await iphone.click('[data-av="spotter"]'); await iphone.selectOption('#pYear', '2001'); await iphone.click('#pGo');
+  await iphone.click('#hHost'); await iphone.waitForSelector('.codebox');
+  check('iPhone tab gets the Add to Home Screen hint', /Add to Home Screen/.test(await iphone.textContent('#alertsBox')));
+  check('iPhone phone: no JS errors', iphone.errs.length === 0, iphone.errs.slice(0, 3).join(' | '));
   check('London phone: no JS errors', london.errs.length === 0, london.errs.slice(0, 3).join(' | '));
   // legal pages: linked from the app, readable at phone width, contact filled in
   await london.evaluate(() => localStorage.removeItem('gr.session'));
