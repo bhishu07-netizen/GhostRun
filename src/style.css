@@ -195,6 +195,8 @@ img { max-width: 100%; }
 .title b { display: block; font-size: 17px; }
 .title.blue { background: var(--ghost-soft); } .title.pink { background: var(--hunt-soft); }
 
+.net { position: fixed; left: 50%; transform: translateX(-50%); z-index: 9; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  background: var(--ink); color: #fff; font-weight: 600; font-size: 14px; padding: 8px 16px; border-radius: 999px; box-shadow: 0 6px 18px rgba(59, 42, 107, .25); }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); z-index: 9; top: calc(env(safe-area-inset-top, 0px) + 12px); width: min(92vw, 420px);
   background: var(--card); border: 2px solid var(--line); border-radius: 16px; padding: 10px 14px; font-weight: 600; font-size: 15px; box-shadow: 0 6px 20px rgba(59, 42, 107, .14); }
 .maplibregl-ctrl-attrib { font-family: var(--body); }

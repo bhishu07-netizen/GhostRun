@@ -29,23 +29,31 @@ function tick(g) {
   }
 }
 const api = {
-  create_game(a) { if (!a.p_age_ok) throw err('13+'); const id = 'g' + seq++; const g = games[id] = { id, code: 'K7QX', mode: a.p_mode, status: 'lobby', catches: 0, ping_seq: 0, pings: [], hints: [], locs: {}, catchesList: [] }; const r = newPlayer(g, a.p_name, a.p_avatar, 'hunter'); g.host_id = r.player_id; return r; },
+  create_game(a) { if (!a.p_age_ok) throw err('13+'); const id = 'g' + seq++; const code = Object.keys(games).length ? Math.random().toString(36).slice(2, 6).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(4, 'Z') : 'K7QX'; const g = games[id] = { id, code, mode: a.p_mode, status: 'lobby', catches: 0, ping_seq: 0, pings: [], hints: [], locs: {}, catchesList: [] }; const r = newPlayer(g, a.p_name, a.p_avatar, 'hunter'); g.host_id = r.player_id; return r; },
   join_game(a) { const g = Object.values(games).find((x) => x.code === a.p_code); if (!g) throw err('No game with that code.'); if (g.status !== 'lobby') throw err('That game already started.'); return newPlayer(g, a.p_name, a.p_avatar, 'ghost'); },
   set_team(a) { const me = auth(a); players[a.p_target].team = a.p_team; },
   set_mode(a) { const me = auth(a); games[me.game].mode = a.p_mode; },
-  start_game(a) { const me = auth(a); const g = games[me.game]; const ps = gp(g); if (!ps.some((p) => p.team === 'hunter') || !ps.some((p) => p.team === 'ghost')) throw err('You need at least 1 hunter and 1 ghost.'); Object.assign(g, { status: 'live', start_players: ps.length, started_at: nowIso(), hunt_starts_at: new Date(Date.now() + (g.mode === 'quick' ? 1 : ((g.rules || {}).head || 5)) * 60000).toISOString(), ends_at: g.mode === 'hour' ? new Date(Date.now() + ((g.rules || {}).len || 60) * 60000).toISOString() : null }); g.next_ping_at = g.mode !== 'quick' ? new Date(Date.now() + interval(g) * 60000).toISOString() : null; },
+  start_game(a) { const me = auth(a); const g = games[me.game]; g.zone_start = g.zone ? g.zone.r : null; const ps = gp(g); if (!ps.some((p) => p.team === 'hunter') || !ps.some((p) => p.team === 'ghost')) throw err('You need at least 1 hunter and 1 ghost.'); Object.assign(g, { status: 'live', start_players: ps.length, started_at: nowIso(), hunt_starts_at: new Date(Date.now() + (g.mode === 'quick' ? 1 : ((g.rules || {}).head || 5)) * 60000).toISOString(), ends_at: g.mode === 'hour' ? new Date(Date.now() + ((g.rules || {}).len || 60) * 60000).toISOString() : null }); g.next_ping_at = g.mode !== 'quick' ? new Date(Date.now() + interval(g) * 60000).toISOString() : null; },
   update_location(a) { const me = auth(a); const g = games[me.game]; if (g.status === 'live') g.locs[me.id] = { lat: a.p_lat, lng: a.p_lng, acc: a.p_acc, at: nowIso() }; },
   report_catch(a) { const me = auth(a); const g = games[me.game]; if (Date.now() < +new Date(g.hunt_starts_at)) throw err('Hold on, ghosts still have their head start.'); g.catchesList.push({ id: catchId++, hunter: me.id, ghost: a.p_ghost, status: 'pending', at: Date.now() }); },
   respond_catch(a) { const me = auth(a); const g = games[me.game]; const c = g.catchesList.find((x) => x.id === a.p_catch && x.ghost === me.id && x.status === 'pending'); if (!c) return; c.status = a.p_accept ? 'confirmed' : 'rejected'; if (a.p_accept) { Object.assign(me, { team: 'hunter', alive: false, caught_by: c.hunter }); g.catches++; tick(g); } },
   upload_hint(a) { const me = auth(a); const g = games[me.game]; const h = g.hints.find((x) => x.player === me.id && x.seq === a.p_seq && !x.photo); if (!/^data:image\/jpeg;base64,/.test(a.p_photo) || a.p_photo.length > 400000) throw err('Photo must be a JPEG under 300 KB.'); if (!h) throw err('Too late'); h.photo = a.p_photo; h.uploaded_at = nowIso(); },
   end_game(a) { const me = auth(a); end(games[me.game], 'ghosts'); },
+  rematch(a) {
+    const me = auth(a); const g = games[me.game]; if (g.status !== 'ended') throw err('You can only start a rematch after the game ends.');
+    const n = g.rematch_code && Object.values(games).find((x) => x.code === g.rematch_code && x.status === 'lobby');
+    if (n) return api.join_game({ p_code: n.code, p_name: me.name, p_avatar: me.avatar, p_age_ok: true });
+    const r = api.create_game({ p_mode: g.mode, p_name: me.name, p_avatar: me.avatar, p_age_ok: true });
+    const ng = games[r.game_id]; ng.rules = g.rules; ng.zone = g.zone ? { ...g.zone, r: g.zone_start || g.zone.r } : null;
+    g.rematch_code = ng.code; return r;
+  },
   set_rules(a) { const me = auth(a); const g = games[me.game]; if (g.host_id !== me.id) throw err('Only the host can change the rules.'); if (g.status !== 'lobby') throw err('locked'); g.rules = { head: a.p_head, len: a.p_len, ping: a.p_ping, shrink: !!a.p_shrink }; },
   set_zone(a) { const me = auth(a); const g = games[me.game]; if (g.host_id !== me.id) throw err('Only the host can set the play zone.'); if (g.status !== 'lobby') throw err('The play zone is locked once the game starts.'); g.zone = a.p_radius == null ? null : { lat: a.p_lat, lng: a.p_lng, r: a.p_radius }; },
   save_push(a) { const me = auth(a); if (!/^https:\/\//.test(a.p_sub && a.p_sub.endpoint)) throw err('bad sub'); pushSubs.set(a.p_sub.endpoint, me.id); },
   leave_game(a) { const me = auth(a); delete players[me.id]; const g = games[me.game]; if (g.host_id === me.id) { const n = gp(g)[0]; g.host_id = n && n.id; } if (g.status === 'live') tick(g); },
   get_state(a) {
     const me = auth(a); const g = games[me.game]; tick(g);
-    const res = { now: nowIso(), game: { id: g.id, code: g.code, mode: g.mode, status: g.status, host_id: g.host_id, started_at: g.started_at, hunt_starts_at: g.hunt_starts_at, ends_at: g.ends_at, next_ping_at: g.next_ping_at, catches: g.catches, ping_seq: g.ping_seq, winner: g.winner, interval_min: g.mode === 'quick' || g.status === 'lobby' ? null : interval(g), zone: g.zone || null, rules: { head: null, len: null, ping: null, shrink: false, ...(g.rules || {}) } },
+    const res = { now: nowIso(), game: { id: g.id, code: g.code, mode: g.mode, status: g.status, host_id: g.host_id, started_at: g.started_at, hunt_starts_at: g.hunt_starts_at, ends_at: g.ends_at, next_ping_at: g.next_ping_at, catches: g.catches, ping_seq: g.ping_seq, winner: g.winner, rematch_code: g.rematch_code || null, interval_min: g.mode === 'quick' || g.status === 'lobby' ? null : interval(g), zone: g.zone || null, rules: { head: null, len: null, ping: null, shrink: false, ...(g.rules || {}) } },
       me: { id: me.id, name: me.name, avatar: me.avatar, team: me.team, out_since: me.out_since || null },
       players: gp(g).map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, team: p.team, caught: !p.alive, caught_by: p.caught_by || null, online: true })),
       teammates: gp(g).filter((p) => p.team === me.team && p.id !== me.id && g.locs[p.id]).map((p) => ({ id: p.id, ...g.locs[p.id] })) };
@@ -212,8 +220,18 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   check('ghost results: HUNTERS WIN', /HUNTERS WIN/.test(await ghost.textContent('#screen')));
   check('Bloodhound title', /Bloodhound/.test(await host.textContent('#screen')));
   await host.screenshot({ path: OUT + '/07-results.png' });
+  // rematch: the ghost starts one, the host joins it with one tap
+  await ghost.click('#rMatch'); await ghost.waitForSelector('#lLeave');
+  check('rematch starter becomes host of a new lobby', await ghost.isVisible('#lStart'));
+  await sleep(5600);
+  check('host is offered Join the rematch', /Join the rematch/.test(await host.textContent('#rMatch')));
+  await host.click('#rMatch'); await host.waitForSelector('#lLeave'); await sleep(3500);
+  check('both players in the rematch lobby', (await ghost.$$('.teams .pl')).length === 2);
+  const rm = Object.values(games).find((x) => x.status === 'lobby' && gp(x).length === 2);
+  check('rematch keeps mode, rules and the zone at its starting size', rm && rm.mode === 'endless' && rm.rules && rm.rules.ping === 5 && rm.zone && rm.zone.r === 250, rm && JSON.stringify({ mode: rm.mode, rules: rm.rules, r: rm.zone && rm.zone.r }));
+  await ghost.click('#lLeave'); await host.click('#lLeave'); await sleep(300);
   // leave flow from a fresh lobby
-  await host.click('#rHome'); await host.click('#hHost'); await host.waitForSelector('#lLeave'); await host.click('#lLeave'); await sleep(300);
+  await host.click('#hHost'); await host.waitForSelector('#lLeave'); await host.click('#lLeave'); await sleep(300);
   check('lobby Leave calls leave_game', calls.includes('leave_game'));
   check('back home after leave', await host.isVisible('#hHost'));
   // reload resumes session
@@ -229,6 +247,23 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   await london.click('#hHost'); await london.waitForSelector('.codebox');
   check('London phone hosts a lobby', await london.isVisible('#lStart'));
   check('1-hour lobby has no separate game-length rule', !/Game length/.test(await london.textContent('#rulesBox')));
+  // invite link: a brand-new friend opens ?join=CODE, makes a profile and lands in the lobby
+  const lcode = (await london.textContent('.codebox b')).trim();
+  const friend = await mk(51.508, -0.128);
+  await friend.goto(URL + '?join=' + lcode); await friend.waitForSelector('#pGo');
+  check('invite link greets the friend', new RegExp('invited to hunt ' + lcode).test(await friend.textContent('#screen')));
+  await friend.fill('#pName', 'Zoe'); await friend.click('[data-av="ghost"]'); await friend.selectOption('#pYear', '2000'); await friend.click('#pGo');
+  await friend.waitForSelector('#lLeave');
+  check('invite link lands in that lobby', (await friend.textContent('.codebox b')).trim() === lcode);
+  check('invite code removed from the address bar', (await friend.evaluate(() => location.search)) === '');
+  check('friend: no JS errors', friend.errs.length === 0, friend.errs.slice(0, 3).join(' | '));
+  // losing the connection shows one quiet pill, not a toast every 3 s
+  await london.route(/rpc\/get_state/, (r) => r.abort());
+  await sleep(6500);
+  check('offline shows Reconnecting', await london.isVisible('#net'));
+  check('offline does not spam toasts', !/internet/i.test((await london.textContent('#toast')) || ''));
+  await london.unroute(/rpc\/get_state/); await sleep(3500);
+  check('Reconnecting clears when back online', !(await london.isVisible('#net')));
   // an iPhone in a Safari tab can't get web push: show how to add Ghostrun to the Home Screen
   const iphone = await mk(40.7128, -74.006, 'iPhone 13');
   await iphone.goto(URL); await iphone.fill('#pName', 'Maya'); await iphone.click('[data-av="spotter"]'); await iphone.selectOption('#pYear', '2001'); await iphone.click('#pGo');

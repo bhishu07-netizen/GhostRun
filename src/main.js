@@ -62,7 +62,7 @@ function renderProfile() {
   screen.innerHTML = `
     <section class="card sheet">
       <div class="brand big"><img src="/icons/icon-192.png" alt="" width="88" height="88"><h1 class="logo big">GHOSTRUN</h1></div>
-      <p class="muted">Pick who you'll be on the map.</p>
+      <p class="muted">${pendingJoin ? `You're invited to hunt <b>${esc(pendingJoin)}</b>. Pick who you'll be, and we'll take you to the lobby.` : 'Pick who you\'ll be on the map.'}</p>
       <label class="field"><span>Your name</span><input id="pName" maxlength="20" autocomplete="nickname" value="${esc(p.name || '')}" placeholder="Bhishu"></label>
       <div class="avatars" role="radiogroup" aria-label="Choose an avatar">
         ${AVATARS.map(([k, label]) => `<button class="av ${p.avatar === k ? 'on' : ''}" role="radio" aria-checked="${p.avatar === k}" data-av="${k}"><img src="/a/${k}.png" alt=""><span>${label.replace('The ', '')}</span></button>`).join('')}
@@ -89,7 +89,7 @@ function renderProfile() {
     if (!year) return fail('Select the year you were born.');
     if (thisYear - year < 13) return fail('Sorry, Ghostrun is for players 13 and older.');
     profile.set({ name, avatar: chosen, year, ageOk: true });
-    renderHome();
+    if (pendingJoin) joinByCode(pendingJoin); else renderHome();
   };
 }
 
@@ -136,11 +136,19 @@ function renderHome() {
     const code = screen.querySelector('#hCode').value.trim().toUpperCase();
     if (code.length !== 4) return fail('Enter the 4-letter lobby code.');
     e.target.disabled = true;
-    try {
-      const r = await rpc('join_game', { p_code: code, p_name: p.name, p_avatar: p.avatar, p_age_ok: !!p.ageOk });
-      session.set(r); enterGame();
-    } catch (x) { fail(x.message); e.target.disabled = false; }
+    if (!(await joinByCode(code, fail))) e.target.disabled = false;
   };
+}
+
+// join a lobby by its code; used by the Join button and by invite links (?join=CODE)
+async function joinByCode(code, fail = (m) => { renderHome(); toast(m, 6000); }) {
+  pendingJoin = null;
+  const p = profile.get();
+  try {
+    const r = await rpc('join_game', { p_code: code, p_name: p.name, p_avatar: p.avatar, p_age_ok: !!p.ageOk });
+    session.set(r); enterGame();
+    return true;
+  } catch (x) { fail(x.message); return false; }
 }
 
 // ------------------------------------------------------------------ polling
@@ -162,6 +170,7 @@ async function poll() {
       photoCache.set(`${h.player_id}:${h.seq}`, h.photo);
       if (!photosSince || h.uploaded_at > photosSince) photosSince = h.uploaded_at;
     });
+    netState(true);
     const prev = S; S = st;
     if (st.game.status !== 'ended') linkToGame().catch(() => { /* alerts are a bonus */ });
     detectEvents(prev, st);
@@ -170,11 +179,26 @@ async function poll() {
     else renderResults();
   } catch (x) {
     if (/not allowed/i.test(x.message)) { session.clear(); stopPolling(); renderHome(); toast('That game is no longer available.'); }
-    else toast(x.message);
+    else if (/internet|network|fetch/i.test(x.message)) netState(false);
+    else if (x.message !== lastPollError) { lastPollError = x.message; toast(x.message); }
   } finally { busy = false; }
 }
 
 function playerById(id) { return S.players.find((p) => p.id === id); }
+
+let lastPollError = '';
+const netEl = document.getElementById('net');
+function netState(ok) {
+  if (ok) lastPollError = '';
+  if (netEl) netEl.hidden = ok;
+}
+
+// coming back to the app (e.g. from a ping alert): refresh straight away and send a fresh fix
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !session.get()) return;
+  if (pollTimer) poll();
+  if (geoWatch !== null) { stopGeo(); lastSent = 0; startGeo(); }
+});
 
 // tell the server we're gone (host passes on, empty sides end the game), then forget the session locally
 function leaveGame() {
@@ -276,8 +300,9 @@ function renderLobby() {
   showLobbyZone(g.zone);
   screen.querySelector('#lLeave').onclick = leaveGame;
   screen.querySelector('#lShare').onclick = async () => {
-    const text = `Join my Ghostrun hunt! Code: ${g.code} ${location.origin}`;
-    try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); toast('Invite copied'); } }
+    const url = `${location.origin}/?join=${g.code}`;
+    const text = `Join my Ghostrun hunt! Tap to join, or use code ${g.code}.`;
+    try { if (navigator.share) await navigator.share({ text, url }); else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Invite link copied'); } }
     catch { /* cancelled */ }
   };
   screen.querySelectorAll('.pl').forEach((b) => b.onclick = async () => {
@@ -648,10 +673,15 @@ function wireAlerts(root) {
 }
 
 // ------------------------------------------------------------------ results
+let resultsFor = null;
 function renderResults() {
-  if (cam) cam.close();
-  stopPolling(); clearGameMap(); hud.hidden = true; modal.innerHTML = ''; map.setOrbit(true); map.flyTo(homeView());
   const g = S.game;
+  // the results screen keeps polling (slowly) so a rematch started by a friend shows up
+  if (resultsFor === g.id) { updateRematch(); return; }
+  resultsFor = g.id;
+  if (cam) cam.close();
+  stopPolling(); pollTimer = setInterval(poll, 5000);
+  clearGameMap(); hud.hidden = true; modal.innerHTML = ''; map.setOrbit(true); map.flyTo(homeView());
   const counts = {};
   S.players.forEach((p) => { if (p.caught_by) counts[p.caught_by] = (counts[p.caught_by] || 0) + 1; });
   const survivors = S.players.filter((p) => p.team === 'ghost');
@@ -666,13 +696,33 @@ function renderResults() {
         ${survivors.map((p) => `<div class="title blue"><img src="/a/${esc(p.avatar)}.png" alt=""><span><b>Last Ghost</b>${esc(p.name)} was never caught</span></div>`).join('')}
         ${top ? `<div class="title pink"><img src="/a/${esc(top.avatar)}.png" alt=""><span><b>Bloodhound</b>${esc(top.name)} · ${counts[topId]} catch${counts[topId] === 1 ? '' : 'es'}</span></div>` : ''}
       </div>
-      <button class="btn primary" id="rHome">Play again</button>
+      <button class="btn primary" id="rMatch"></button>
+      <button class="btn soft" id="rHome">Back home</button>
+      <p class="err" id="rErr" hidden></p>
     </section>`;
-  screen.querySelector('#rHome').onclick = () => { session.clear(); renderHome(); };
+  updateRematch();
+  screen.querySelector('#rMatch').onclick = async (e) => {
+    e.target.disabled = true;
+    try { const r = await rpc('rematch', auth()); resultsFor = null; session.set(r); enterGame(); }
+    catch (x) { const er = screen.querySelector('#rErr'); er.textContent = x.message; er.hidden = false; e.target.disabled = false; }
+  };
+  screen.querySelector('#rHome').onclick = () => { resultsFor = null; stopPolling(); session.clear(); renderHome(); };
+}
+function updateRematch() {
+  const b = screen.querySelector('#rMatch');
+  if (!b || b.disabled) return;
+  b.textContent = S.game.rematch_code ? `Join the rematch (${S.game.rematch_code})` : 'Rematch with the same group';
 }
 
 // ------------------------------------------------------------------ boot
 registerWorker();
+let pendingJoin = null;
+{
+  const q = new URLSearchParams(location.search).get('join');
+  if (q && /^[A-Za-z0-9]{4}$/.test(q)) pendingJoin = q.toUpperCase();
+  if (q) history.replaceState(null, '', location.pathname); // don't re-join on refresh
+}
 if (!profile.get()) renderProfile();
-else if (session.get()) enterGame();
+else if (session.get()) { pendingJoin = null; enterGame(); }
+else if (pendingJoin) joinByCode(pendingJoin);
 else renderHome();
