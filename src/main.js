@@ -187,6 +187,11 @@ function leaveGame() {
 // catches, team switches, pings: the moments everyone should feel
 function detectEvents(prev, st) {
   if (!prev || prev.game.status !== 'live' || st.game.status !== 'live') return;
+  const seenZone = new Set((prev.pings || []).filter((p) => p.kind === 'zone').map((p) => p.created_at));
+  (st.pings || []).filter((p) => p.kind === 'zone' && !seenZone.has(p.created_at)).forEach((p) => {
+    const g = p.snapshot[0] && st.players.find((x) => x.id === p.snapshot[0].id);
+    if (g) { buzz([60, 40, 60]); toast(`${g.name} left the play zone. Their spot is on the map.`); }
+  });
   const before = new Set(prev.players.filter((p) => p.caught).map((p) => p.id));
   st.players.filter((p) => p.caught && !before.has(p.id)).forEach((p) => {
     const by = st.players.find((x) => x.id === p.caught_by);
@@ -216,7 +221,7 @@ function caughtSplash(text, left) {
 
 // ------------------------------------------------------------------ lobby
 function renderLobby() {
-  hud.hidden = true; map.setOrbit(true);
+  hud.hidden = true; map.setOrbit(!S.game.zone); // hold still over the zone once there is one
   const g = S.game, me = S.me, isHost = g.host_id === me.id;
   const hunters = S.players.filter((p) => p.team === 'hunter'), ghosts = S.players.filter((p) => p.team === 'ghost');
   const n = S.players.length;
@@ -245,12 +250,15 @@ function renderLobby() {
       <p class="small muted">${isHost ? 'Tap a player to switch their team.' : 'Tap yourself to switch team.'}</p>
       ${g.mode === 'quick' ? '<p class="small">Quick mode: no pings. Pure hide and seek.</p>'
         : `<div class="ladder"><span>Pings for ${n} players</span>${ladder.map((m, i) => `<b>${m} min<em>${i === 0 ? 'start' : `${i} catch${i > 1 ? 'es' : ''}`}</em></b>`).join('')}</div>`}
+      ${zoneBox(isHost, g.zone)}
       ${alertsBox()}
       ${isHost ? '<button class="btn primary" id="lStart">Start the hunt</button>' : '<p class="waiting">Waiting for the host to start…</p>'}
       <p class="err" id="lErr" hidden></p>
     </section>`;
   const err = screen.querySelector('#lErr');
   wireAlerts(screen);
+  wireZone(screen, err);
+  showLobbyZone(g.zone);
   screen.querySelector('#lLeave').onclick = leaveGame;
   screen.querySelector('#lShare').onclick = async () => {
     const text = `Join my Ghostrun hunt! Code: ${g.code} ${location.origin}`;
@@ -308,9 +316,35 @@ function drawMe() {
   if (!centered) { centered = true; map.flyTo({ center: myPos, zoom: 17.2, pitch: 50 }); }
 }
 map.on('load', () => {
+  map.addSource('zone', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'zone-fill', type: 'fill', source: 'zone', paint: { 'fill-color': '#7C5CD6', 'fill-opacity': 0.06 } });
+  map.addLayer({ id: 'zone-line', type: 'line', source: 'zone', paint: { 'line-color': '#7C5CD6', 'line-width': 3, 'line-dasharray': [2, 1.5] } });
   map.addSource('acc', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'acc-fill', type: 'fill', source: 'acc', paint: { 'fill-color': '#818CF8', 'fill-opacity': 0.14 } });
+  drawZone(shownZone);
 });
+
+// ----- play zone on the map
+let shownZone = null, zoneKey = '';
+const zoneId = (z) => (z ? `${z.lat},${z.lng},${z.r}` : '');
+function drawZone(z) {
+  shownZone = z;
+  const src = map.getSource && map.getSource('zone');
+  if (src) src.setData(z ? circle([z.lng, z.lat], z.r, 96) : { type: 'FeatureCollection', features: [] });
+}
+// metres between two [lng, lat] points
+function distM([lng1, lat1], [lng2, lat2]) {
+  const r = (d) => (d * Math.PI) / 180;
+  const a = Math.sin(r(lat2 - lat1) / 2) ** 2 + Math.cos(r(lat1)) * Math.cos(r(lat2)) * Math.sin(r(lng2 - lng1) / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(a));
+}
+// outside only beyond the radius plus GPS accuracy (at least 20 m), the same rule the server uses
+function outsideZone(z) {
+  if (!z || !myPos) return false;
+  return distM([z.lng, z.lat], myPos) > z.r + Math.max(myPos[2] || 0, 20);
+}
+const zoneLabel = (r) => (r >= 1000 ? `${r / 1000} km` : `${r} m`);
+const ZONE_SIZES = [250, 500, 1000, 2000];
 
 function setMarker(key, opts, lngLat, opacity = 1) {
   let m = markers.get(key);
@@ -323,6 +357,7 @@ function clearGameMap() {
   if (meMarker) { meMarker.remove(); meMarker = null; }
   const src = map.getSource && map.getSource('acc');
   if (src) src.setData({ type: 'FeatureCollection', features: [] });
+  drawZone(null); zoneKey = '';
   stopGeo(); centered = false; myPos = null; lastFix = 0; geoStarted = 0; geoDenied = false;
 }
 
@@ -338,6 +373,16 @@ function renderLive() {
   const noGps = me.team === 'hunter' ? (S.ghost_gps || []).filter((x) => x.age_s == null || x.age_s > 120)
     .map((x) => ({ ...x, p: playerById(x.id) })).filter((x) => x.p) : [];
 
+  drawZone(g.zone);
+  const out = outsideZone(g.zone);
+  if (out && !wasOutside) buzz([300, 100, 300]);
+  wasOutside = out;
+  const zoneBanner = !out ? '' : me.team === 'hunter'
+    ? '<div class="banner warn">You\'re outside the play zone.</div>'
+    : headLeft > 0 ? '<div class="banner warn"><b>Outside the play zone!</b> Get back in before the hunt starts.</div>'
+    : zoneOutLeft() > 0 ? `<div class="banner warn"><b>Outside the play zone!</b> Get back in within <b data-t="zone">${fmt(zoneOutLeft())}</b> or hunters will see you.</div>`
+    : '<div class="banner warn"><b>Outside the play zone!</b> Hunters can see your spot until you\'re back in.</div>';
+
   // ----- HUD
   hud.hidden = false;
   hud.className = 'hud ' + me.team;
@@ -350,6 +395,7 @@ function renderLive() {
       <span><b>${ghostsLeft}</b> ghost${ghostsLeft === 1 ? '' : 's'} left</span>
       ${pingLeft !== null ? `<span>Next ping <b data-t="ping">${fmt(pingLeft)}</b> · every ${g.interval_min}m</span>` : `<span>${MODES[g.mode].label} mode</span>`}
     </div>
+    ${zoneBanner}
     ${headLeft > 0 ? `<div class="banner">${me.team === 'hunter' ? `Ghosts are hiding. You can hunt in <b data-t="head">${fmt(headLeft)}</b>` : `Run and hide! Hunters start in <b data-t="head">${fmt(headLeft)}</b>`}</div>` : ''}
     ${me.team === 'ghost' && geoStarted && (geoDenied || (Date.now() - geoStarted > 20000 && Date.now() - lastFix > 60000))
       ? '<div class="banner warn">Your location is off. Hunters can see that you have no GPS. Turn location on to play fair.</div>' : ''}
@@ -382,7 +428,8 @@ function renderLive() {
         shown.add(s.id);
         const key = 'p:' + s.id;
         const seenAge = s.at ? (t - ts(s.at)) / 60000 : age; // when the ghost was really there, not when the ping fired
-        setMarker(key, { avatar: p.avatar, label: `${p.name} · ${Math.max(0, Math.round(seenAge))}m ago`, ring: RING.ghost, echo: true }, [s.lng, s.lat], Math.max(0.35, 1 - seenAge / 20));
+        const why = pg.kind === 'zone' ? ' · left the zone' : '';
+        setMarker(key, { avatar: p.avatar, label: `${p.name}${why} · ${Math.max(0, Math.round(seenAge))}m ago`, ring: RING.ghost, echo: true }, [s.lng, s.lat], Math.max(0.35, 1 - seenAge / 20));
         seen.add(key);
       });
     });
@@ -428,6 +475,7 @@ setInterval(() => {
     else if (k === 'up') el.textContent = fmt((t - ts(g.started_at)) / 1000);
     else if (k === 'ping') el.textContent = fmt((ts(g.next_ping_at) - t) / 1000);
     else if (k === 'head') el.textContent = fmt((ts(g.hunt_starts_at) - t) / 1000);
+    else if (k === 'zone') el.textContent = fmt(zoneOutLeft());
   });
 }, 1000);
 
@@ -471,6 +519,53 @@ function openMenu() {
   modal.querySelector('#mLeave').onclick = leaveGame;
   const end = modal.querySelector('#mEnd');
   if (end) end.onclick = async () => { modal.innerHTML = ''; await rpc('end_game', auth()).catch((x) => toast(x.message)); poll(); };
+}
+
+// ------------------------------------------------------------------ play zone (lobby)
+let wasOutside = false, zoneBusy = false;
+// seconds a ghost has left before the server shows them to the hunters
+function zoneOutLeft() {
+  const o = S && S.me.out_since;
+  return o ? Math.max(0, 30 - (now() - ts(o)) / 1000) : 30;
+}
+function zoneBox(isHost, z) {
+  if (!isHost) {
+    return z ? `<p class="pill zone-pill">Play zone: <b>${zoneLabel(z.r)}</b> around the host's spot. Stay inside or hunters will see you.</p>`
+      : '<p class="pill zone-pill">No play zone. Go anywhere.</p>';
+  }
+  return `<div class="zonebox" id="zoneBox">
+      <p><b>Play zone</b> · ${z ? `${zoneLabel(z.r)} circle around where you set it.` : 'none yet. Players can go anywhere.'}</p>
+      <div class="zone-sizes" role="group" aria-label="Zone size">${ZONE_SIZES.map((r) => `<button class="zchip ${z && z.r === r ? 'on' : ''}" data-r="${r}" ${zoneBusy ? 'disabled' : ''}><b>${zoneLabel(r)}</b></button>`).join('')}</div>
+      <p class="small muted">${zoneBusy ? 'Finding you…' : 'Tap a size to draw the zone around where you\'re standing. Ghosts who stay outside it get shown to the hunters.'}</p>
+      ${z ? '<button class="btn soft slim" id="zoneOff">Remove zone</button>' : ''}
+    </div>`;
+}
+function wireZone(root, err) {
+  const fail = (m) => { err.textContent = m; err.hidden = false; };
+  root.querySelectorAll('.zone-sizes [data-r]').forEach((b) => b.onclick = () => {
+    if (!('geolocation' in navigator)) return fail('This phone can\'t share its location, so it can\'t set a zone.');
+    zoneBusy = true; renderLobby();
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      try {
+        await rpc('set_zone', { ...auth(), p_lat: pos.coords.latitude, p_lng: pos.coords.longitude, p_radius: +b.dataset.r });
+        lastPos.set([pos.coords.longitude, pos.coords.latitude]);
+      } catch (x) { fail(x.message); }
+      zoneBusy = false; poll();
+    }, (e) => {
+      zoneBusy = false; renderLobby();
+      fail(e.code === 1 ? 'Allow location for Ghostrun to set the zone around you.' : 'Couldn\'t find you. Try again outside.');
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+  });
+  const off = root.querySelector('#zoneOff');
+  if (off) off.onclick = async () => { try { await rpc('set_zone', { ...auth(), p_lat: null, p_lng: null, p_radius: null }); poll(); } catch (x) { fail(x.message); } };
+}
+// draw the zone behind the lobby and fly to it once each time it changes
+function showLobbyZone(z) {
+  drawZone(z);
+  const k = zoneId(z);
+  if (k === zoneKey) return;
+  zoneKey = k;
+  if (z) { map.setOrbit(false); map.flyTo({ center: [z.lng, z.lat], zoom: Math.max(12.5, 17.3 - Math.log2(z.r / 100)), pitch: 30, duration: 1800 }); }
 }
 
 // ------------------------------------------------------------------ alerts

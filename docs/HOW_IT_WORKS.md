@@ -64,6 +64,13 @@ The profile (name, avatar, birth year) stays on the phone (`gr.profile`). The se
 
 On no, the hunter gets an "escaped" toast and must wait 30 s before claiming the same ghost again.
 
+**Play zone** (`set_zone`, host only, lobby only):
+- **Setting it:** the host taps a size (250 m, 500 m, 1 km or 2 km), and the zone becomes a circle around where they're standing. The circle is drawn on every player's map.
+- **What counts as outside:** being further from the centre than the radius plus the GPS accuracy (at least 20 m). This stops wobble at the edge from counting.
+- **On leaving the zone:** a ghost gets an alert ("You left the play zone"), and the app shows a banner with a 30-second countdown.
+- **The penalty:** after the head start, a ghost who stays out 30 seconds is revealed to hunters as a `zone` ping. It repeats at most once a minute while they stay out, and hunters get a toast and alert, and a "left the zone" marker.
+- **Server:** `_zone_check` runs inside `_tick`, and `players.out_since` tracks when each ghost left.
+
 **Leaving** (`leave_game`): the player is deleted. If they were host, the earliest remaining player becomes host, and a lobby with nobody left is deleted. In a live game, no hunters left means ghosts win, and no ghosts left means hunters win.
 
 **End.** `_end` sets the winner, deletes all locations and photo hints, and blanks every ping snapshot. The results screen works out the awards on the phone: **Last Ghost** for every survivor, **Bloodhound** for the hunter with the most catches.
@@ -74,7 +81,8 @@ On no, the hunter gets an "escaped" toast and must wait 30 s before claiming the
 |---|---|---|
 | Players list (names, teams, caught) | ✅ | ✅ |
 | Live position of own teammates (fresh within 2 min) | ✅ hunters | ✅ ghosts |
-| Ghost positions | only via the last 6 pings/penalty snapshots | ❌ |
+| Ghost positions | only via the last 6 pings/penalty/zone snapshots | ❌ |
+| The play zone | ✅ | ✅ |
 | Each ghost's GPS freshness (`ghost_gps`, after head start) | ✅ | ❌ |
 | Photo hints | ✅ (incremental via `p_photos_since`) | ❌ |
 | Own catch claims (last 2 min) | ✅ | — |
@@ -131,5 +139,5 @@ A website can't track location in the background. Instead, ghosts can lock their
 
 ## 11. Testing
 
-- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors, last-position memory, a phone in London hosting a game, and phone-width overflow. 42 checks.
+- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors, last-position memory, a phone in London hosting a game, alerts, the play zone (setting it, warning outside, clearing back inside), and phone-width overflow. 60 checks.
 - The server functions were play-tested inside rolled-back transactions on the live database: auth, guards, pings, penalties, catches, win conditions, data wiping, the hardening fixes, no-GPS snapshots and cron-driven pings and time-up.
