@@ -11,7 +11,12 @@ function auth(a) { const p = players[a.p_player]; if (!p || p.secret !== a.p_sec
 function newPlayer(g, name, avatar, team) { const id = 'p' + seq++; players[id] = { id, secret: 's' + id, game: g.id, name, avatar, team, alive: true, joined: seq }; return { player_id: id, secret: 's' + id, game_id: g.id, code: g.code }; }
 const gp = (g) => Object.values(players).filter((p) => p.game === g.id);
 function end(g, w) { if (g.status !== 'live') return; g.status = 'ended'; g.winner = w; g.next_ping_at = null; g.hints = []; g.locs = {}; }
+const distM = (a, b) => { const r = (d) => d * Math.PI / 180; const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2; return 2 * 6371000 * Math.asin(Math.sqrt(h)); };
 function tick(g) {
+  if (g.status === 'live' && g.zone) gp(g).filter((p) => p.team === 'ghost' && g.locs[p.id]).forEach((p) => {
+    const l = g.locs[p.id]; const out = distM(g.zone, l) > g.zone.r + Math.max(l.acc || 0, 20);
+    if (out && !p.out_since) p.out_since = nowIso(); if (!out) p.out_since = null;
+  });
   if (g.status !== 'live') return;
   if (!gp(g).some((p) => p.team === 'ghost')) return end(g, 'hunters');
   if (g.ends_at && Date.now() >= +new Date(g.ends_at)) return end(g, 'ghosts');
@@ -33,12 +38,13 @@ const api = {
   respond_catch(a) { const me = auth(a); const g = games[me.game]; const c = g.catchesList.find((x) => x.id === a.p_catch && x.ghost === me.id && x.status === 'pending'); if (!c) return; c.status = a.p_accept ? 'confirmed' : 'rejected'; if (a.p_accept) { Object.assign(me, { team: 'hunter', alive: false, caught_by: c.hunter }); g.catches++; tick(g); } },
   upload_hint(a) { const me = auth(a); const g = games[me.game]; const h = g.hints.find((x) => x.player === me.id && x.seq === a.p_seq && !x.photo); if (!/^data:image\/jpeg;base64,/.test(a.p_photo) || a.p_photo.length > 400000) throw err('Photo must be a JPEG under 300 KB.'); if (!h) throw err('Too late'); h.photo = a.p_photo; h.uploaded_at = nowIso(); },
   end_game(a) { const me = auth(a); end(games[me.game], 'ghosts'); },
+  set_zone(a) { const me = auth(a); const g = games[me.game]; if (g.host_id !== me.id) throw err('Only the host can set the play zone.'); if (g.status !== 'lobby') throw err('The play zone is locked once the game starts.'); g.zone = a.p_radius == null ? null : { lat: a.p_lat, lng: a.p_lng, r: a.p_radius }; },
   save_push(a) { const me = auth(a); if (!/^https:\/\//.test(a.p_sub && a.p_sub.endpoint)) throw err('bad sub'); pushSubs.set(a.p_sub.endpoint, me.id); },
   leave_game(a) { const me = auth(a); delete players[me.id]; const g = games[me.game]; if (g.host_id === me.id) { const n = gp(g)[0]; g.host_id = n && n.id; } if (g.status === 'live') tick(g); },
   get_state(a) {
     const me = auth(a); const g = games[me.game]; tick(g);
-    const res = { now: nowIso(), game: { id: g.id, code: g.code, mode: g.mode, status: g.status, host_id: g.host_id, started_at: g.started_at, hunt_starts_at: g.hunt_starts_at, ends_at: g.ends_at, next_ping_at: g.next_ping_at, catches: g.catches, ping_seq: g.ping_seq, winner: g.winner, interval_min: g.mode === 'quick' || g.status === 'lobby' ? null : interval(g) },
-      me: { id: me.id, name: me.name, avatar: me.avatar, team: me.team },
+    const res = { now: nowIso(), game: { id: g.id, code: g.code, mode: g.mode, status: g.status, host_id: g.host_id, started_at: g.started_at, hunt_starts_at: g.hunt_starts_at, ends_at: g.ends_at, next_ping_at: g.next_ping_at, catches: g.catches, ping_seq: g.ping_seq, winner: g.winner, interval_min: g.mode === 'quick' || g.status === 'lobby' ? null : interval(g), zone: g.zone || null },
+      me: { id: me.id, name: me.name, avatar: me.avatar, team: me.team, out_since: me.out_since || null },
       players: gp(g).map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, team: p.team, caught: !p.alive, caught_by: p.caught_by || null, online: true })),
       teammates: gp(g).filter((p) => p.team === me.team && p.id !== me.id && g.locs[p.id]).map((p) => ({ id: p.id, ...g.locs[p.id] })) };
     if (me.team === 'hunter') Object.assign(res, { pings: g.pings.slice(0, 6), photos: g.hints.filter((h) => h.photo && (!a.p_photos_since || h.uploaded_at > a.p_photos_since)).map((h) => ({ player_id: h.player, seq: h.seq, photo: h.photo, uploaded_at: h.uploaded_at })), my_claims: g.catchesList.filter((c) => c.hunter === me.id).map((c) => ({ id: c.id, ghost_id: c.ghost, status: c.status })),
@@ -102,6 +108,15 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   check('alerts link this phone to the game', [...pushSubs.values()].includes(ghostId));
   await sleep(3200);
   check('lobby shows alerts are on', /Alerts are on/.test(await ghost.textContent('#alertsBox')));
+  // play zone: host draws 250 m around themselves; everyone sees it
+  check('host gets the zone sizes', (await host.$$('.zone-sizes .zchip')).length === 4);
+  await host.click('.zchip[data-r="250"]'); await sleep(800);
+  const gz = Object.values(games)[0].zone;
+  check('zone set around the host', gz && gz.r === 250 && Math.abs(gz.lat - 30.7701) < 0.001, JSON.stringify(gz));
+  await sleep(3200);
+  check('ghost sees the zone in the lobby', /Play zone: 250 m/.test(await ghost.textContent('.zone-pill')));
+  check('host sees the chosen size', await host.isVisible('.zchip.on[data-r="250"]'));
+  await host.screenshot({ path: OUT + '/02b-lobby-zone.png' });
   await host.screenshot({ path: OUT + '/02-lobby-host.png' });
   await host.click('#lStart'); const liveAt = Date.now(); await sleep(3500);
   check('host HUD live as HUNTER', (await host.textContent('.role')) === 'HUNTER');
@@ -113,6 +128,14 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   const c2 = await ghost.textContent('[data-t="head"]');
   check('countdown ticks every second', c1 !== c2, `${c1} -> ${c2}`);
   check('geolocation sent to server', calls.includes('update_location'));
+  check('no zone warning while inside', !/Outside the play zone/.test(await ghost.textContent('.hud')));
+  await ghost.context().setGeolocation({ latitude: 30.7790, longitude: 76.5759, accuracy: 10 }); // ~1 km north
+  await sleep(6500);
+  check('ghost warned outside the zone', /Outside the play zone/.test(await ghost.textContent('.hud')));
+  await ghost.screenshot({ path: OUT + '/03b-outside-zone.png' });
+  await ghost.context().setGeolocation({ latitude: 30.7712, longitude: 76.5771, accuracy: 10 });
+  await sleep(6500);
+  check('warning clears back inside', !/Outside the play zone/.test(await ghost.textContent('.hud')));
   await ghost.screenshot({ path: OUT + '/03-live-ghost.png' });
   // catch during head start
   await host.click('#gCatch'); await host.click('.picklist .pl'); await sleep(400);

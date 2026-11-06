@@ -27,7 +27,10 @@ img { max-width: 100%; }
 /* ---------- menu screens float over the orbiting map ---------- */
 #screen { position: fixed; inset: 0; z-index: 4; overflow-y: auto; pointer-events: none;
   padding: calc(env(safe-area-inset-top, 0px) + 16px) max(16px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 16px) max(16px, env(safe-area-inset-left, 0px));
-  display: flex; flex-direction: column; justify-content: flex-end; }
+  display: flex; flex-direction: column; }
+/* sit at the bottom when short, scroll from the top when taller than the screen
+   (justify-content: flex-end would cut off the top of a tall card) */
+#screen > * { margin-top: auto; }
 #screen:empty { display: none; }
 .card { background: var(--card); border: 2px solid var(--line); border-radius: 26px; box-shadow: 0 10px 30px rgba(59, 42, 107, .14); }
 .sheet { pointer-events: auto; width: 100%; max-width: 460px; margin: 0 auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
@@ -46,6 +49,14 @@ img { max-width: 100%; }
 .small { font-size: 13px; margin: 0; }
 .fine { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.4; }
 .fine a, .legal a { color: var(--accent-deep); font-weight: 600; }
+.zonebox { margin: 0; background: var(--soft); border: 2px solid var(--line); border-radius: 16px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.zonebox p { margin: 0; font-size: 14px; line-height: 1.4; }
+.zone-sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.zchip { background: var(--card); border: 2px solid var(--line); border-radius: 14px; padding: 8px 4px; font: 700 15px var(--body); color: var(--ink); min-height: 44px; }
+.zchip.on { border-color: var(--accent); box-shadow: 0 3px 0 var(--line); }
+.zchip:disabled { opacity: .6; }
+.zonebox .btn.slim { align-self: flex-start; }
+.zone-pill { font-size: 14px; }
 .alerts { margin: 0; background: var(--soft); border: 2px solid var(--line); border-radius: 16px; padding: 10px 12px; font-size: 14px; line-height: 1.4; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .alerts p { margin: 0; }
 .alerts.on { border-color: #A7E3B5; background: #EFFAF1; }
