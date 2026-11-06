@@ -60,7 +60,7 @@ img { max-width: 100%; }
 .rules-pill { font-size: 14px; }
 .zonebox { margin: 0; background: var(--soft); border: 2px solid var(--line); border-radius: 16px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
 .zonebox p { margin: 0; font-size: 14px; line-height: 1.4; }
-.zone-sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.zone-sizes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .zchip { background: var(--card); border: 2px solid var(--line); border-radius: 14px; padding: 8px 4px; font: 700 15px var(--body); color: var(--ink); min-height: 44px; }
 .zchip.on { border-color: var(--accent); box-shadow: 0 3px 0 var(--line); }
 .zchip:disabled { opacity: .6; }

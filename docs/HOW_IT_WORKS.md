@@ -72,7 +72,7 @@ On no, the hunter gets an "escaped" toast and must wait 30 s before claiming the
 - **Defaults:** `null` means "use the default", so games without custom rules behave exactly as before.
 
 **Play zone** (`set_zone`, host only, lobby only):
-- **Setting it:** the host taps a size (250 m, 500 m, 1 km or 2 km), and the zone becomes a circle around where they're standing. The circle is drawn on every player's map.
+- **Setting it:** the host taps a size (250 m, 500 m, 1 km, 2 km or 5 km), and the zone becomes a circle around where they're standing. **Anywhere** (the default) means no zone. The circle is drawn on every player's map.
 - **What counts as outside:** being further from the centre than the radius plus the GPS accuracy (at least 20 m). This stops wobble at the edge from counting.
 - **On leaving the zone:** a ghost gets an alert ("You left the play zone"), and the app shows a banner with a 30-second countdown.
 - **The penalty:** after the head start, a ghost who stays out 30 seconds is revealed to hunters as a `zone` ping. It repeats at most once a minute while they stay out, and hunters get a toast and alert, and a "left the zone" marker.

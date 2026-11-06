@@ -111,7 +111,9 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   await sleep(3200);
   check('lobby shows alerts are on', /Alerts are on/.test(await ghost.textContent('#alertsBox')));
   // play zone: host draws 250 m around themselves; everyone sees it
-  check('host gets the zone sizes', (await host.$$('.zone-sizes .zchip')).length === 4);
+  check('host gets the zone sizes plus Anywhere', (await host.$$('.zone-sizes .zchip')).length === 6);
+  check('Anywhere is chosen when there is no zone', await host.isVisible('#zoneOff.on'));
+  check('ghost sees Anywhere before a zone is set', /Anywhere/.test(await ghost.textContent('.zone-pill')));
   await host.click('.zchip[data-r="250"]'); await sleep(800);
   const gz = Object.values(games)[0].zone;
   check('zone set around the host', gz && gz.r === 250 && Math.abs(gz.lat - 30.7701) < 0.001, JSON.stringify(gz));

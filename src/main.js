@@ -351,7 +351,7 @@ function outsideZone(z) {
   return distM([z.lng, z.lat], myPos) > z.r + Math.max(myPos[2] || 0, 20);
 }
 const zoneLabel = (r) => (r >= 1000 ? `${r / 1000} km` : `${r} m`);
-const ZONE_SIZES = [250, 500, 1000, 2000];
+const ZONE_SIZES = [250, 500, 1000, 2000, 5000];
 
 function setMarker(key, opts, lngLat, opacity = 1) {
   let m = markers.get(key);
@@ -583,13 +583,12 @@ function zoneOutLeft() {
 function zoneBox(isHost, z) {
   if (!isHost) {
     return z ? `<p class="pill zone-pill">Play zone: <b>${zoneLabel(z.r)}</b> around the host's spot. Stay inside or hunters will see you.</p>`
-      : '<p class="pill zone-pill">No play zone. Go anywhere.</p>';
+      : '<p class="pill zone-pill">Play zone: <b>Anywhere</b>. No limits, go wherever you like.</p>';
   }
   return `<div class="zonebox" id="zoneBox">
-      <p><b>Play zone</b> · ${z ? `${zoneLabel(z.r)} circle around where you set it.` : 'none yet. Players can go anywhere.'}</p>
-      <div class="zone-sizes" role="group" aria-label="Zone size">${ZONE_SIZES.map((r) => `<button class="zchip ${z && z.r === r ? 'on' : ''}" data-r="${r}" ${zoneBusy ? 'disabled' : ''}><b>${zoneLabel(r)}</b></button>`).join('')}</div>
-      <p class="small muted">${zoneBusy ? 'Finding you…' : 'Tap a size to draw the zone around where you\'re standing. Ghosts who stay outside it get shown to the hunters.'}</p>
-      ${z ? '<button class="btn soft slim" id="zoneOff">Remove zone</button>' : ''}
+      <p><b>Play zone</b> · ${z ? `${zoneLabel(z.r)} circle around where you set it.` : 'Anywhere. No limits.'}</p>
+      <div class="zone-sizes" role="group" aria-label="Zone size">${ZONE_SIZES.map((r) => `<button class="zchip ${z && z.r === r ? 'on' : ''}" data-r="${r}" ${zoneBusy ? 'disabled' : ''}><b>${zoneLabel(r)}</b></button>`).join('')}<button class="zchip ${z ? '' : 'on'}" id="zoneOff" ${zoneBusy ? 'disabled' : ''}><b>Anywhere</b></button></div>
+      <p class="small muted">${zoneBusy ? 'Finding you…' : 'Pick a size to draw the zone around where you\'re standing. Ghosts who stay outside it get shown to the hunters. Anywhere means no zone.'}</p>
     </div>`;
 }
 function wireZone(root, err) {
@@ -609,7 +608,7 @@ function wireZone(root, err) {
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
   });
   const off = root.querySelector('#zoneOff');
-  if (off) off.onclick = async () => { try { await rpc('set_zone', { ...auth(), p_lat: null, p_lng: null, p_radius: null }); poll(); } catch (x) { fail(x.message); } };
+  if (off) off.onclick = async () => { if (!S.game.zone) return; try { await rpc('set_zone', { ...auth(), p_lat: null, p_lng: null, p_radius: null }); poll(); } catch (x) { fail(x.message); } };
 }
 // draw the zone behind the lobby and fly to it once each time it changes
 function showLobbyZone(z) {
