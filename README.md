@@ -9,7 +9,7 @@ Real-life manhunt you can play anywhere in the world: a campus, a neighbourhood,
 - **1 hour** and **Endless**: pings start at 15 / 20 / 25 min depending on player count (4–5 / 6–7 / 8+), and the gap drops by 5 min with every catch, down to 5 min
 
 ## Stack
-- Vite + MapLibre GL on OpenFreeMap vector tiles (custom pastel style)
+- Vite + MapLibre GL on OpenFreeMap vector tiles (custom pastel style), with an optional Esri satellite view
 - Supabase Postgres: all game rules run server-side in security-definer functions; tables are closed to the browser, raw locations never leave the server except as scheduled pings
 - Self-hosted fonts (Fredoka, Kanit), no analytics or session replay
 - Deployed on Vercel with a strict Content Security Policy

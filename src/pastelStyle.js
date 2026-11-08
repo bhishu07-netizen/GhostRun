@@ -40,6 +40,10 @@ export const buildingColor = ['match', ['%', SEED, 6],
 // k goes 0 -> 1 when the map opens, so buildings grow out of the ground
 export const buildingHeight = (k) => ['*', k, ['+', 7, ['*', 5, ['%', SEED, 5]]]];
 
+// Satellite view hides the pastel drawing and shows photos instead; only the names stay on top.
+export const SAT_HIDDEN = ['landuse', 'landcover', 'park', 'water', 'paths', 'road-case', 'road', 'building', 'building-3d'];
+export const LABEL_INK = { 'road-names': C.muted, poi: C.ink, places: C.muted };
+
 export function pastelStyle() {
   return {
     version: 8,
@@ -47,9 +51,16 @@ export function pastelStyle() {
     light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.3, position: [1.2, 210, 40] },
     sources: {
       omt: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' },
+      // only fetched while Satellite is switched on
+      sat: {
+        type: 'raster', tileSize: 256, maxzoom: 18,
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        attribution: 'Imagery © Esri, Maxar, Earthstar Geographics',
+      },
     },
     layers: [
       { id: 'bg', type: 'background', paint: { 'background-color': C.bg } },
+      { id: 'satellite', type: 'raster', source: 'sat', layout: { visibility: 'none' }, paint: { 'raster-fade-duration': 300 } },
       {
         id: 'landuse', type: 'fill', source: 'omt', 'source-layer': 'landuse',
         paint: {
