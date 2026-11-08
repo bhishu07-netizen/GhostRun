@@ -58,7 +58,7 @@ const api = {
 };
 const calls = [];
 async function wire(ctx) {
-  await ctx.route(/openfreemap\.org/, (r) => r.abort());
+  await ctx.route(/openfreemap\.org|arcgisonline\.com/, (r) => r.abort());
   await ctx.route(/supabase\.co\/rest\/v1\/rpc\/(\w+)/, async (route) => {
     const fn = route.request().url().split('/rpc/')[1]; const args = JSON.parse(route.request().postData() || '{}'); calls.push(fn);
     try { const out = api[fn](args); await route.fulfill({ status: 200, contentType: 'application/json', body: out === undefined ? '' : JSON.stringify(out) }); }
@@ -93,6 +93,24 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
     check(`${name}: reaches home`, await pg.isVisible('#hHost'));
   }
   await host.screenshot({ path: OUT + '/01-home.png' });
+  // map buttons on the home screen: compass (North up), satellite, centre on me
+  const ctl = (pg, k) => pg.getAttribute('.mapctl', 'data-' + k);
+  check('map buttons show on home', await host.isVisible('.mapctl'));
+  check('map opens zoomed in (street level)', +(await ctl(host, 'zoom')) >= 16.5, await ctl(host, 'zoom'));
+  await host.click('#mcSat');
+  check('satellite switches on', (await ctl(host, 'type')) === 'satellite' && (await host.getAttribute('#mcSat', 'aria-pressed')) === 'true');
+  check('satellite choice is remembered', (await host.evaluate(() => localStorage.getItem('gr.maptype'))) === 'satellite');
+  await host.click('#mcSat');
+  check('back to the Ghostrun map', (await ctl(host, 'type')) === 'pastel' && (await host.evaluate(() => localStorage.getItem('gr.maptype'))) === 'pastel');
+  await host.click('#mcCompass'); await sleep(900);
+  check('North up turns on and points north', (await host.getAttribute('#mcCompass', 'aria-pressed')) === 'true' && (await ctl(host, 'bearing')) === '0', await ctl(host, 'bearing'));
+  await host.click('#mcCompass');
+  check('Default mode lets the map rotate again', (await host.getAttribute('#mcCompass', 'aria-pressed')) === 'false');
+  await host.click('#mcLoc'); await sleep(1800);
+  check('centre on me zooms in on the player', +(await ctl(host, 'zoom')) >= 17.1, await ctl(host, 'zoom'));
+  await dark.click('#mcLoc'); await sleep(700);
+  check('no location permission: friendly hint', /Allow location/.test(await dark.textContent('.mc-hint')));
+  await host.screenshot({ path: OUT + '/01b-home-map-buttons.png' });
   await ghost.fill('#hCode', 'ZZZZ'); await ghost.click('#hJoin'); await sleep(300);
   check('bad code error shown', /No game/.test(await ghost.textContent('#hErr')));
   await host.click('[data-mode="endless"]'); await host.click('#hHost'); await host.waitForSelector('.codebox');
@@ -142,6 +160,8 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   await host.screenshot({ path: OUT + '/02-lobby-host.png' });
   await host.click('#lStart'); const liveAt = Date.now(); await sleep(3500);
   check('host HUD live as HUNTER', (await host.textContent('.role')) === 'HUNTER');
+  check('map buttons sit above the action buttons in a game', await host.evaluate(() => document.querySelector('.mapctl').classList.contains('live')));
+  check('map follows the player in a game', (await ctl(host, 'follow')) === '1');
   check('ghost HUD live as GHOST', (await ghost.textContent('.role')) === 'GHOST');
   check('head-start banner', /Hunters start in/.test(await ghost.textContent('.hud')));
   check('head start follows the rules (2 min)', /Hunters start in <b[^>]*>[12]:\d\d/.test(await ghost.innerHTML('.hud')));

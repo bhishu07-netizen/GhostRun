@@ -1,0 +1,26 @@
+/* compass, satellite and centre-on-me buttons */
+.mapctl {
+  position: fixed; z-index: 6; display: flex; flex-direction: column; gap: 10px;
+  right: max(12px, env(safe-area-inset-right, 0px));
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+}
+.mapctl[hidden] { display: none; }
+/* during a game the top is the scoreboard, so the buttons sit above the action buttons instead */
+.mapctl.live { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); }
+
+.mc {
+  width: 46px; height: 46px; padding: 0; display: grid; place-items: center;
+  background: var(--card); color: var(--ink); border: 2px solid var(--line); border-radius: 15px;
+  box-shadow: 0 4px 14px rgba(59, 42, 107, .18); transition: transform .12s, background .2s, color .2s;
+}
+.mc:active { transform: scale(.94); }
+.mc[aria-pressed="true"] { background: var(--accent); border-color: var(--accent-deep); color: #fff; }
+
+.mc-hint {
+  position: absolute; right: calc(100% + 10px); top: 4px; margin: 0; width: max-content; max-width: min(64vw, 260px);
+  background: var(--card); color: var(--ink); border: 2px solid var(--line); border-radius: 14px; padding: 8px 12px;
+  font: 600 14px var(--body); box-shadow: 0 6px 20px rgba(59, 42, 107, .14);
+}
+.mc-hint[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) { .mc { transition: none; } }

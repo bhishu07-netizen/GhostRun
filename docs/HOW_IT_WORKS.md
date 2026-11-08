@@ -11,9 +11,11 @@ A teardown of the whole system: what runs where, how a game moves from lobby to 
    main.js   screens + game loop   ──►    11+1 SECURITY DEFINER RPCs
    api.js    fetch /rest/v1/rpc/*  ◄──    _tick() advances the game clock
    map.js    MapLibre + pastel style
+   mapControls.js  compass, satellite, centre-on-me
    camera.js photo hint capture
         │
-        └─► OpenFreeMap vector tiles (map only)
+        ├─► OpenFreeMap vector tiles (map)
+        └─► Esri World Imagery tiles (only while Satellite is on)
 ```
 
 - **No server code of its own.** The app is static files on Vercel. All game rules live in Postgres functions (`supabase/migrations/`).
@@ -99,14 +101,15 @@ A hunter's live position is never sent to ghosts.
 ## 6. Client internals (`src/`)
 
 - **`main.js`**: one file holds every screen. `renderProfile → renderHome → (poll loop) renderLobby / renderLive / renderResults`. Each poll replaces the whole screen with `innerHTML` built from the new state, with every value escaped by `esc()`. `detectEvents(prev, next)` compares two states to trigger the caught splash, the ping buzz and the "escaped" toast. A 1 s ticker updates the `[data-t]` countdowns between polls. `clockOffset` corrects for a wrong phone clock using the server's `now`.
-- **`map.js`**: MapLibre with a globe projection and no area limit, so it works anywhere. On the menus it opens over the player's last known spot (`gr.lastpos`, rounded to about 100 m, stored only on the phone). If location is already allowed, it quietly moves there without a permission prompt. Otherwise it shows the whole globe and slowly turns it. Buildings rise the first time the map is zoomed in close enough to see them. `avatarMarker` is an HTML marker with a coloured ring. `circle()` draws the GPS accuracy halo.
-- **`pastelStyle.js`**: a hand-written MapLibre style over OpenFreeMap tiles.
+- **`map.js`**: MapLibre with a globe projection and no area limit, so it works anywhere. On the menus it opens close in (zoom 17, like a maps app) over the player's last known spot (`gr.lastpos`, rounded to about 100 m, stored only on the phone). If location is already allowed, it quietly moves there without a permission prompt; the first "Let's play" tap asks for it. Until it knows where the player is, it opens on Chandigarh University, never on a far-off globe. Buildings rise the first time the map is zoomed in close enough to see them. `setMapType('pastel' | 'satellite')` switches the picture, and `lockNorth` keeps north at the top. `avatarMarker` is an HTML marker with a coloured ring. `circle()` draws the GPS accuracy halo.
+- **`mapControls.js`**: three buttons in the corner, shown on the home screen and during a game. **Compass** switches between *North up* (north always at the top, rotation turned off) and *Default* (turn the map with two fingers); the needle follows the map's bearing. **Satellite** swaps the pastel drawing for Esri photos, keeping the names on top in white. **Centre on me** flies to the player (asking for location if needed) and, during a game, keeps following them until they drag the map away. Choices are remembered on the phone (`gr.northup`, `gr.maptype`). On menu screens the map is padded so the player's spot sits above the card, not behind it. The buttons also expose their state as `data-*` attributes, which the tests read.
+- **`pastelStyle.js`**: a hand-written MapLibre style over OpenFreeMap tiles, plus a hidden satellite layer.
 - **`camera.js`**: live back camera through `getUserMedia`, falling back to an `<input capture>` picker. The frame is redrawn on a canvas at no more than 720 px and JPEG quality is lowered until the image is under ~380 KB (the server limit is 400 000 characters).
 - **GPS**: `watchPosition` with high accuracy, sent at most every 5 s. A Wake Lock keeps the screen on during play.
 
 ## 7. Security & privacy posture
 
-- **CSP** in `vercel.json`: scripts from self only; connections only to OpenFreeMap and the project's Supabase URL; framing blocked.
+- **CSP** in `vercel.json`: scripts from self only; connections only to OpenFreeMap, Esri (satellite tiles) and the project's Supabase URL; framing blocked.
 - **Publishable key** in `api.js`: safe to ship, because it can only call the RPCs above.
 - **Server-side checks**: inputs are validated in SQL (mode and team via CHECK constraints, avatar whitelist, JPEG-only photos, 20-character names).
 
@@ -145,5 +148,5 @@ A website can't track location in the background. Instead, ghosts can lock their
 
 ## 11. Testing
 
-- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors, last-position memory, a phone in London hosting a game, alerts, the play zone (setting it, warning outside, clearing back inside), custom rules (saved, shown to players, 2-minute head start) and the zone shrinking at a ping, and phone-width overflow. 66 checks.
+- `npm run build && npx vite preview --port 4173 &` then `npm run test:e2e`: two simulated phones play a full Endless game against an in-memory copy of the server rules. It covers profile and age gate, lobby, head start, ping, photo hint, rejected and confirmed catch, results, leave, a third phone with location denied (hunter + ghost warnings, still gets photo hint), JS errors, last-position memory, a phone in London hosting a game, alerts, the play zone (setting it, warning outside, clearing back inside), custom rules (saved, shown to players, 2-minute head start) and the zone shrinking at a ping, the map buttons (satellite, North up, centre on me, following during a game), and phone-width overflow. 82 checks.
 - The server functions were play-tested inside rolled-back transactions on the live database: auth, guards, pings, penalties, catches, win conditions, data wiping, the hardening fixes, no-GPS snapshots and cron-driven pings and time-up.
