@@ -161,6 +161,14 @@ const results = []; const check = (name, ok, extra = '') => { results.push(`${ok
   await host.click('#lStart'); const liveAt = Date.now(); await sleep(3500);
   check('host HUD live as HUNTER', (await host.textContent('.role')) === 'HUNTER');
   check('map buttons sit above the action buttons in a game', await host.evaluate(() => document.querySelector('.mapctl').classList.contains('live')));
+  const hit = await host.evaluate(() => ['mcCompass', 'mcSat', 'mcLoc'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!(e && e.closest('#' + id)); }));
+  check('in a game the map buttons are not covered', hit.every(Boolean), JSON.stringify(hit));
+  await host.click('#mcSat'); await sleep(400);
+  check('satellite switches on during a game', (await ctl(host, 'type')) === 'satellite');
+  await host.click('#mcSat');
+  await host.click('#mcCompass'); await sleep(900);
+  check('North up works during a game', (await ctl(host, 'bearing')) === '0' && (await host.getAttribute('#mcCompass', 'aria-pressed')) === 'true');
+  await host.click('#mcCompass');
   check('map follows the player in a game', (await ctl(host, 'follow')) === '1');
   check('ghost HUD live as GHOST', (await ghost.textContent('.role')) === 'GHOST');
   check('head-start banner', /Hunters start in/.test(await ghost.textContent('.hud')));
