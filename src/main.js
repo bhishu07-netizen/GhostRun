@@ -4,7 +4,8 @@ import '@fontsource/fredoka/700.css';
 import '@fontsource/kanit/900-italic.css';
 import './style.css';
 import { rpc, profile, session, auth, lastPos } from './api.js';
-import { createMap, avatarMarker, circle, WORLD_VIEW, localView } from './map.js';
+import { createMap, avatarMarker, circle, DEFAULT_VIEW, localView } from './map.js';
+import { mountMapControls } from './mapControls.js';
 import { openCamera } from './camera.js';
 import { registerWorker, alertState, turnOnAlerts, linkToGame } from './push.js';
 
@@ -34,9 +35,10 @@ function toast(msg, ms = 3500) {
 }
 const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch { /* not supported */ } };
 
-const homeView = () => (lastPos.get() ? localView(lastPos.get()) : WORLD_VIEW);
+const homeView = () => (lastPos.get() ? localView(lastPos.get()) : DEFAULT_VIEW);
 const map = createMap((m) => console.warn(m), homeView());
 map.setOrbit(true);
+const mapUI = mountMapControls(map, { getPos: () => myPos });
 
 // if location is already allowed, quietly open the map over the player's neighbourhood (never prompts)
 async function locateQuietly() {
@@ -89,6 +91,7 @@ function renderProfile() {
     if (!year) return fail('Select the year you were born.');
     if (thisYear - year < 13) return fail('Sorry, Ghostrun is for players 13 and older.');
     profile.set({ name, avatar: chosen, year, ageOk: true });
+    mapUI.locate({ quiet: true }); // ask for location now, so the map opens on the player
     if (pendingJoin) joinByCode(pendingJoin); else renderHome();
   };
 }

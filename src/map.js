@@ -1,13 +1,16 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { pastelStyle, buildingHeight } from './pastelStyle.js';
+import { pastelStyle, buildingHeight, SAT_HIDDEN, LABEL_INK } from './pastelStyle.js';
 
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 export const WORLD_VIEW = { center: [20, 20], zoom: 1.4, pitch: 0, bearing: 0 };
-export const localView = (lngLat) => ({ center: lngLat, zoom: 16, pitch: 45, bearing: -15 });
+// close enough to read street names and see buildings, like a maps app
+export const localView = (lngLat) => ({ center: lngLat, zoom: 17, pitch: 40, bearing: -15 });
+// where Ghostrun began (Chandigarh University): what the map shows until we know where the player is
+export const DEFAULT_VIEW = localView([76.5759, 30.7701]);
 
-// start where this player last played, or on the whole globe
-export function createMap(onError, start = WORLD_VIEW) {
+// start where this player last played, or on the default spot (never a far-off globe)
+export function createMap(onError, start = DEFAULT_VIEW) {
   const map = new maplibregl.Map({
     container: 'map',
     style: pastelStyle(),
@@ -46,9 +49,28 @@ export function createMap(onError, start = WORLD_VIEW) {
   const spin = () => {
     if (!orbiting) return;
     if (map.getZoom() < 5) { const c = map.getCenter(); map.easeTo({ center: [c.lng + 12, c.lat], duration: 4000, easing: (x) => x }); } // turn the globe
-    else map.easeTo({ bearing: map.getBearing() + 8, duration: 4000, easing: (x) => x }); // circle the neighbourhood
+    else if (!map.lockNorth) map.easeTo({ bearing: map.getBearing() + 8, duration: 4000, easing: (x) => x }); // circle the neighbourhood
   };
   map.on('moveend', spin);
+  // "North up" keeps the top of the screen pointing north, whatever moved the camera
+  map.lockNorth = false;
+  map.on('moveend', () => { if (map.lockNorth && Math.abs(map.getBearing()) > 0.5) map.easeTo({ bearing: 0, duration: 250 }); });
+
+  // 'pastel' (our drawn map) or 'satellite' (photos with the names on top)
+  map.mapType = 'pastel';
+  const paintType = (type) => {
+    const sat = type === 'satellite';
+    map.setLayoutProperty('satellite', 'visibility', sat ? 'visible' : 'none');
+    SAT_HIDDEN.forEach((id) => map.setLayoutProperty(id, 'visibility', sat ? 'none' : 'visible'));
+    Object.entries(LABEL_INK).forEach(([id, ink]) => {
+      map.setPaintProperty(id, 'text-color', sat ? '#FFFFFF' : ink);
+      map.setPaintProperty(id, 'text-halo-color', sat ? 'rgba(25, 15, 55, 0.9)' : '#FFFFFF');
+    });
+  };
+  map.setMapType = (type) => {
+    map.mapType = type;
+    if (map.style && map.getLayer('satellite')) paintType(type); else map.once('style.load', () => paintType(map.mapType));
+  };
   ['mousedown', 'touchstart', 'wheel', 'dragstart'].forEach((ev) => map.on(ev, () => { orbiting = false; }));
   map.setOrbit = (on) => {
     if (reduceMotion) return;
